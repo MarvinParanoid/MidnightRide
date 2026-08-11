@@ -50,14 +50,36 @@ export class Hud {
     this.start.id = 'start';
     this.start.innerHTML = `
       <h1>MIDNIGHT RIDE</h1>
+      <div class="tag">No destination. No finish line.<br />Just you, the road, and the night.</div>
       <div class="sub" data-startsub>—</div>
+      <div class="back" data-startback></div>
       <div class="keys" data-startkeys>
         W / S throttle &amp; brake · A / D steer · Shift boost<br />
         E autopilot · C camera · F photo mode · R rain · M music
       </div>
-      <div class="go" data-startgo>click anywhere to ride</div>
+      <div class="go" data-startgo>press any key to ride</div>
     `;
     document.body.appendChild(this.start);
+
+    /* the world comes up out of black a beat after the title goes */
+    this.fade = document.createElement('div');
+    this.fade.id = 'fade';
+    document.body.appendChild(this.fade);
+
+    this.shot = document.createElement('div');
+    this.shot.className = 'shotflash';
+    document.body.appendChild(this.shot);
+
+    this.bar = document.createElement('div');
+    this.bar.className = 'photobar';
+    this.bar.innerHTML = `
+      <span data-pm></span>
+      <em>drag</em> orbit · <em>wheel</em> dolly · <em>shift+wheel</em> lens
+      · <em>[ ]</em> focus · <em>- =</em> aperture · <em>H</em> interface
+      · <em>Enter</em> save · <em>F</em> back
+    `;
+    document.body.appendChild(this.bar);
+    this.el.pm = this.bar.querySelector('[data-pm]');
 
     this.rotate = document.createElement('div');
     this.rotate.className = 'rotate';
@@ -86,9 +108,31 @@ export class Hud {
     this.start.querySelector('[data-startsub]').textContent = text;
   }
 
+  /** "Welcome back, rider — 184 km travelled." The only progression here. */
+  setReturning(km) {
+    if (!(km > 1)) return;
+    this.start.querySelector('[data-startback]').textContent =
+      `Welcome back, rider — ${km < 1000 ? km.toFixed(0) : (km / 1000).toFixed(1) + 'k'} km travelled`;
+  }
+
   dismiss() {
     this.start.classList.add('gone');
     setTimeout(() => this.start.remove(), 1300);
+    // hold the black a moment longer than the title, then let the road appear
+    setTimeout(() => this.fade.classList.add('clear'), 900);
+  }
+
+  photoBar(on, readout) {
+    this.bar.classList.toggle('on', on);
+    if (on && readout) {
+      this.el.pm.textContent =
+        `${readout.fov}° · focus ${readout.focus}m · blur ${readout.blur} `;
+    }
+  }
+
+  flashShot() {
+    this.shot.classList.add('on');
+    setTimeout(() => this.shot.classList.remove('on'), 220);
   }
 
   toast(text) {

@@ -12,6 +12,7 @@ import { createComposer } from './postfx.js';
 import { Input, isTouchDevice } from './input.js';
 import { Autopilot } from './autopilot.js';
 import { detectQuality } from './quality.js';
+import { PhotoMode } from './photo.js';
 import { Hud, formatClock } from './hud.js';
 import { palette, nightHourFromLocal, placeName, weatherForToday } from './timeofday.js';
 import { AudioCore } from './audio/core.js';
@@ -84,6 +85,25 @@ const weather = weatherForToday();
 const place = placeName();
 hud.setIntro(`${place} · ${weather.temp}°C · ${weather.name}`);
 
+const photo = new PhotoMode({ camera, renderer, scene, composer, canvas });
+
+/* The only thing this game remembers about you: how far you have ridden.
+   No levels, no unlocks — just a note that you have been here before. */
+const ODO_KEY = 'midnightride.km';
+let lifetimeKm = 0;
+try {
+  lifetimeKm = Number(localStorage.getItem(ODO_KEY)) || 0;
+} catch { /* private mode, never mind */ }
+hud.setReturning(lifetimeKm);
+
+function saveOdo() {
+  try {
+    localStorage.setItem(ODO_KEY, String(lifetimeKm + state.odo / 1000));
+  } catch { /* ignore */ }
+}
+addEventListener('pagehide', saveOdo);
+addEventListener('visibilitychange', () => { if (document.hidden) saveOdo(); });
+
 const camPos = new THREE.Vector3(0, 3, 10);
 const camLook = new THREE.Vector3();
 const tmpA = new THREE.Vector3();
@@ -142,9 +162,29 @@ input.on('KeyC', () => {
   hud.toast(CAM_MODES[state.camMode]);
 });
 input.on('KeyF', () => {
-  state.photo = !state.photo;
-  hud.photo(state.photo);
+  if (photo.active) {
+    photo.exit();
+    state.photo = false;
+    hud.photo(false);
+    hud.photoBar(false);
+  } else {
+    road.point(state.s, state.lat, 0, tmpA);
+    photo.enter(tmpA, road.poseAt(state.s).h);
+    state.photo = true;
+    hud.photo(true);
+    hud.photoBar(true, photo.readout);
+  }
 });
+input.on('KeyH', () => {
+  if (!photo.active) return;
+  photo.hideUi = !photo.hideUi;
+  hud.photoBar(!photo.hideUi, photo.readout);
+});
+input.on('BracketLeft', () => photo.active && photo.nudge('focus', -1));
+input.on('BracketRight', () => photo.active && photo.nudge('focus', 1));
+input.on('Minus', () => photo.active && photo.nudge('aperture', -1));
+input.on('Equal', () => photo.active && photo.nudge('aperture', 1));
+input.on('Enter', () => { if (photo.active) photo.wantShot = true; });
 input.on('KeyR', () => {
   const steps = [null, 0, 0.45, 1];
   const i = steps.indexOf(state.rainOverride);
@@ -264,7 +304,22 @@ function updateCamera(dt) {
   camera.lookAt(camLook);
   camera.rotateZ(bike.leanAngle * (mode === 3 ? 0.55 : 0.16));
 
-  const targetFov = fov + (state.throttle > 0.9 && input.boost ? 5 : 0);
+  /* Speed you can feel in your hands. Barely-there jitter that grows with
+     velocity and revs, and turns into a proper shudder off the tarmac —
+     enough that 200 km/h reads differently from 100 without a number. */
+  const offRoad = Math.abs(state.lat) > ROAD_HALF + SHOULDER;
+  const revs = engine ? engine.rpm / 9800 : 0;
+  const shake = Math.pow(clamp(v / 64, 0, 1), 1.7) * 0.014
+    + (offRoad ? 0.045 : 0)
+    + Math.pow(revs, 4) * 0.006;
+  if (shake > 0.0002) {
+    camera.position.x += Math.sin(clock * 61.7) * shake;
+    camera.position.y += Math.sin(clock * 47.3 + 1.7) * shake * 0.8;
+    camera.rotateZ(Math.sin(clock * 23.1) * shake * 0.05);
+  }
+
+  // the lens reacts to what your right hand is doing, not just to speed
+  const targetFov = fov + clamp(accelSm, -8, 8) * 0.55 + (state.throttle > 0.9 && input.boost ? 5 : 0);
   camera.fov = damp(camera.fov, targetFov, 3.5, dt);
   camera.updateProjectionMatrix();
 
@@ -378,6 +433,7 @@ const record = {
 let last = performance.now() / 1000;
 let clock = 0;                 // simulation time; the wall clock in normal play
 let clockTick = 0;
+let odoTick = 15;
 let clockStr = formatClock();
 let fps = 0;
 
@@ -388,10 +444,14 @@ function frame() {
   fps = fps ? fps * 0.94 + (1 / Math.max(dt, 1e-4)) * 0.06 : 1 / Math.max(dt, 1e-4);
   renderer.info.reset();   // autoReset is off, so stats cover the whole frame
   if (!running) dt = Math.min(dt, 1 / 60);
-  clock += dt;
+
+  /* photo mode stops the world: rain hangs in the air, traffic holds still,
+     and only the camera moves */
+  const simDt = photo.active ? 0 : dt;
+  clock += simDt;
   const now = clock;
 
-  if (running) drive(dt, controls(dt, now));
+  if (running && !photo.active) drive(dt, controls(dt, now));
 
   road.update(state.s);
 
@@ -406,14 +466,14 @@ function frame() {
     events.rebase(off);
   }
 
-  const { rainAmount, biome } = updateWorld(dt, now);
+  const { rainAmount, biome } = updateWorld(simDt, now);
 
   /* place the bike */
   road.point(state.s, state.lat, 0, tmpA);
   const p = road.poseAt(state.s);
   bike.setPose(tmpA, p.h, p.pitch);
   const offRoad = Math.abs(state.lat) > ROAD_HALF + SHOULDER;
-  bike.update(dt, {
+  bike.update(simDt, {
     speed: state.v,
     steer: state.steer,
     throttle: state.throttle,
@@ -423,7 +483,8 @@ function frame() {
     wobble: offRoad ? Math.sin(now * 42) * state.v : 0,
   });
 
-  updateCamera(dt);
+  if (photo.active) photo.update(dt, tmpA);
+  else updateCamera(dt);
 
   /* audio */
   if (audio) {
@@ -452,7 +513,16 @@ function frame() {
 
   composer.render();
 
+  /* the drawing buffer is only intact for the rest of this task */
+  if (photo.wantShot && photo.maybeCapture(place)) hud.flashShot();
+  if (photo.active && !photo.hideUi) hud.photoBar(true, photo.readout);
+
   /* hud */
+  odoTick -= dt;
+  if (odoTick <= 0) {
+    odoTick = 15;
+    saveOdo();
+  }
   clockTick -= dt;
   if (clockTick <= 0) {
     clockTick = 1;
@@ -495,7 +565,7 @@ function teleport(s, v = state.v) {
 /* a handle for poking at the ride from the console */
 window.__mr = {
   THREE, renderer, scene, camera, road, bike, traffic, events, input, state,
-  teleport, setAuto, record,
+  teleport, setAuto, record, photo, composer,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },

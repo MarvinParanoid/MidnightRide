@@ -94,6 +94,7 @@ export class Events {
     this.train = { cars: null, active: false, head: 0, side: 1, speed: 40, next: 260 + r() * 420, life: 0 };
     this.rider = { obj: null, lean: null, active: false, s: 0, lat: 0, speed: 42, next: 180 + r() * 360, life: 0, phase: 0 };
     this.storm = { active: false, until: 0, strikeAt: 0, next: 150 + r() * 300, reflash: -1 };
+    this.overlook = { obj: null };
   }
 
   /* ── lazy construction: nothing exists until it first happens ── */
@@ -212,23 +213,42 @@ export class Events {
       if (p.next > 0) return;
       if (!p.group) this.buildPlane();
       const pose = this.road.poseAt(st.s + 600);
-      p.from.set(pose.x - 900, pose.y + 320, pose.z - 500);
-      p.to.set(pose.x + 900, pose.y + 380, pose.z + 700);
+      /* Once in a while it isn't a light crossing the sky at cruise — it is
+         something enormous on approach, low enough to pass right over you. */
+      p.low = this.rnd() < 0.3;
+      if (p.low) {
+        const h = this.rnd() < 0.5 ? 1 : -1;
+        p.from.set(pose.x + h * 700, pose.y + 210, pose.z - 900);
+        p.to.set(pose.x - h * 260, pose.y + 46, pose.z + 700);
+      } else {
+        p.from.set(pose.x - 900, pose.y + 320, pose.z - 500);
+        p.to.set(pose.x + 900, pose.y + 380, pose.z + 700);
+      }
+      p.strobe.scale.setScalar(p.low ? 16 : 40);
+      p.nav.scale.setScalar(p.low ? 11 : 26);
+      p.nav.position.x = p.low ? 11 : 26;
       p.t = 0;
       return;
     }
-    p.t += dt / 46;
+    p.t += dt / (p.low ? 17 : 46);
     if (p.t > 1) {
       p.t = -1;
       p.next = 240 + this.rnd() * 480;
       p.strobe.material.opacity = 0;
       p.nav.material.opacity = 0;
+      if (this.sounds) this.sounds.sky.set(0, 0);
       return;
     }
     p.group.position.lerpVectors(p.from, p.to, p.t);
     const fade = smoothstep(0, 0.08, p.t) * (1 - smoothstep(0.9, 1, p.t));
     p.strobe.material.opacity = (Math.sin(st.now * 7) > 0.85 ? 1 : 0.04) * fade;
     p.nav.material.opacity = 0.5 * fade * (Math.sin(st.now * 2.1) > 0 ? 1 : 0.3);
+
+    if (p.low && this.sounds) {
+      // the noise arrives late and leaves slowly, the way a low pass does
+      const near = 1 - Math.abs(p.t - 0.62) / 0.38;
+      this.sounds.sky.set(Math.pow(Math.max(0, near), 2.2) * 0.7, 0.9);
+    }
   }
 
   updateTrain(dt, st) {
@@ -365,6 +385,74 @@ export class Events {
     }
   }
 
+  buildOverlook() {
+    const rnd = this.rnd;
+    const n = 2600;
+    const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      /* Denser in the middle and taller there too, so it reads as a city with
+         a centre rather than an evenly scattered field of dots. */
+      const r = Math.pow(rnd(), 0.75);
+      pos[i * 3] = (rnd() - 0.5) * 2600 * (0.25 + r);
+      pos[i * 3 + 1] = Math.pow(rnd(), 2.4) * 110 * (1.15 - r);
+      pos[i * 3 + 2] = (rnd() - 0.5) * 1300 * (0.3 + r);
+      const warm = rnd();
+      const c = warm > 0.88 ? [0.55, 0.78, 1.0] : warm > 0.6 ? [1.0, 0.86, 0.62] : [1.0, 0.68, 0.32];
+      col.set(c, i * 3);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+
+    const group = new THREE.Group();
+    const pts = new THREE.Points(g, new THREE.PointsMaterial({
+      size: 2.6, sizeAttenuation: false, vertexColors: true,
+      transparent: true, opacity: 1, blending: THREE.AdditiveBlending,
+      depthWrite: false, fog: false, toneMapped: false,
+    }));
+    pts.frustumCulled = false;
+    group.add(pts);
+
+    // the dome of light over it — from this far out, this is what you see first
+    const dome = this.a.glowSprite(0xff9a4a, 1500, 0.3);
+    dome.position.set(0, 40, 0);
+    dome.scale.set(2600, 620, 1);
+    group.add(dome);
+
+    group.visible = false;
+    this.scene.add(group);
+    this.overlook.obj = group;
+    this.overlook.pts = pts;
+    this.overlook.dome = dome;
+    this.overlook.opacity = 0;
+  }
+
+  /**
+   * The payoff at the end of a long haul: the next city, still kilometres off
+   * and well below the road, laid out as a field of lights before you drop
+   * into it. It fades out as you close in and the real thing takes over.
+   */
+  updateOverlook(dt, st) {
+    const o = this.overlook;
+    const dist = this.road.distanceTo(BIOME.CITY, st.s, 2800);
+    const show = dist < 2600 && dist > 450 && st.remote > 0.18;
+    if (show && !o.obj) this.buildOverlook();
+    if (!o.obj) return;
+
+    const want = show ? smoothstep(450, 1400, dist) * smoothstep(0.18, 0.5, st.remote) : 0;
+    o.opacity = damp(o.opacity, want, 1.1, dt);
+    o.pts.material.opacity = o.opacity * 0.55;
+    o.dome.material.opacity = o.opacity * 0.1;
+    o.obj.visible = o.opacity > 0.008;
+    if (o.obj.visible && Number.isFinite(dist)) {
+      // ahead and below: you come over a rise and the whole place is laid out
+      this.road.point(st.s + dist + 250, 0, -60, this.tmp);
+      o.obj.position.copy(this.tmp);
+      o.obj.rotation.y = -this.road.poseAt(st.s + dist).h;
+    }
+  }
+
   updateStorm(dt, st) {
     const sm = this.storm;
     if (st.rain < 0.35) {
@@ -404,12 +492,17 @@ export class Events {
   /** @returns the lightning flash level for this frame, 0..1 */
   update(dt, st) {
     if (st.audio && !this.sounds) {
-      this.sounds = { train: new TrainSound(st.audio), rider: new RiderSound(st.audio) };
+      this.sounds = {
+        train: new TrainSound(st.audio),
+        sky: new TrainSound(st.audio),      // the same rumble, for a low pass
+        rider: new RiderSound(st.audio),
+      };
     }
 
     this.updatePlane(dt, st);
     this.updateTrain(dt, st);
     this.updateRider(dt, st);
+    this.updateOverlook(dt, st);
     this.updateStorm(dt, st);
 
     this.flash = Math.max(0, this.flash - dt * 3.2);

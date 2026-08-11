@@ -88,6 +88,45 @@ html, body {
   transition: opacity 1.1s ease;
 }
 #start.gone { opacity: 0; pointer-events: none; }
+#start .tag {
+  font-size: clamp(11px, 1.5vw, 13px); letter-spacing: 0.24em; line-height: 2.2;
+  color: rgba(180, 198, 230, 0.5); text-align: center; text-transform: lowercase;
+  margin-top: -8px;
+}
+#start .back {
+  font-size: 11px; letter-spacing: 0.26em; color: var(--cyan);
+  opacity: 0.72; text-shadow: 0 0 22px rgba(87, 232, 255, 0.4);
+}
+
+/* the world rises out of black after the title has gone */
+#fade {
+  position: fixed; inset: 0; z-index: 9; pointer-events: none;
+  background: #04050a; opacity: 1;
+  transition: opacity 2.6s cubic-bezier(0.4, 0, 0.3, 1);
+}
+#fade.clear { opacity: 0; }
+
+.shotflash {
+  position: fixed; inset: 0; z-index: 12; pointer-events: none;
+  background: #dfeaff; opacity: 0; transition: opacity 0.18s ease-out;
+}
+.shotflash.on { opacity: 0.5; transition-duration: 0.03s; }
+
+/* ── photo mode ───────────────────────────────────────────── */
+.photobar {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+  display: none; white-space: nowrap;
+  padding: 10px 20px; border-radius: 999px;
+  font-size: 11px; letter-spacing: 0.16em;
+  color: rgba(190, 208, 238, 0.55);
+  background: rgba(8, 11, 20, 0.6);
+  border: 1px solid rgba(140, 168, 210, 0.16);
+  backdrop-filter: blur(8px);
+}
+.photobar.on { display: block; }
+.photobar em { font-style: normal; color: rgba(226, 236, 255, 0.85); }
+.photobar span { color: var(--cyan); }
+
 #start h1 {
   font-size: clamp(30px, 7vw, 66px); font-weight: 200; letter-spacing: 0.5em;
   text-indent: 0.5em; color: #eaf2ff;

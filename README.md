@@ -20,7 +20,7 @@ npm run dev      # http://127.0.0.1:5173
 | `Shift` | boost |
 | `E` | autopilot |
 | `C` | camera (chase · close · cinematic · first person) |
-| `F` | photo mode — hides the interface |
+| `F` | photo mode |
 | `R` | cycle the rain |
 | `M` | music on/off |
 | `T` | push the clock forward an hour |
@@ -83,9 +83,19 @@ something if you have been nowhere first.
 minutes is scenery, an aeroplane every twenty minutes is something you look up
 at. A freight train runs the parallel line and settles into your pace for a
 while. Another rider catches you, or you catch them, and they sit in the next
-lane for a minute before winding it on. A storm cell moves through, throwing
-lightning every ten seconds or so, with the thunder arriving a few seconds
-behind. Nothing is announced and nothing appears twice in a row.
+lane for a minute before winding it on. Occasionally the aircraft is not at
+cruise but on approach, low enough to pass right over your head. A storm cell
+moves through, throwing lightning every ten seconds or so, with the thunder
+arriving a few seconds behind. And at the end of a long haul, a kilometre or two
+out, the next city appears below the road as a field of lights before you drop
+into it. Nothing is announced and nothing appears twice in a row.
+
+## Coming back
+
+The game remembers one thing about you: how far you have ridden, ever. Next time
+you open it the title says `Welcome back, rider — 184 km travelled`. No levels,
+no unlocks, no garage. That is the whole of the progression and it is going to
+stay that way.
 
 **Wet asphalt** is the one thing worth spending effort on at night. It comes from
 three parts: a roughness map that leaves puddles smoother than the tarmac around
@@ -139,6 +149,17 @@ src/
     engine.js    engine, wind, tyres, rain, whoosh
     music.js     the generative synthwave sequencer
 ```
+
+## Photo mode
+
+`F` stops the world. Rain hangs in the air, the traffic holds still, and you get
+a free camera around the bike: drag to orbit, wheel to dolly, shift-wheel for the
+lens, `[` `]` to pull focus, `-` `=` for the amount of blur, `H` for a completely
+clean frame, `Enter` to save a PNG.
+
+The depth of field is real — a bokeh pass inserted ahead of the bloom, so out-of-
+focus lights bloom the way they should. The saved image is the raw render: no
+interface, no overlay, whatever you framed.
 
 ## Recording
 
