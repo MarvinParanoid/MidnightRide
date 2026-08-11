@@ -42,6 +42,24 @@ precision never degrades on a long ride.
 occasional lone petrol station — so the ride has a shape without ever repeating a
 fixed loop.
 
+**Long hauls** are the ride's larger rhythm. Every so often the generator commits
+to ten to twenty kilometres with no city at all — four to seven minutes at speed.
+Each chunk carries a *remoteness* value that ramps to 1 through the middle of it,
+and everything reads from it: street lighting thins out and then stops, traffic
+drops to almost nothing, the orange lid of light pollution lifts off the sky and
+the stars come back, and one petrol station sits alone near the midpoint. A
+kilometre or two before the next city the glow returns to the horizon ahead of
+you, so you see the place before you reach it. Arriving somewhere only means
+something if you have been nowhere first.
+
+**Rare events** are deliberately, aggressively rare — an aeroplane every few
+minutes is scenery, an aeroplane every twenty minutes is something you look up
+at. A freight train runs the parallel line and settles into your pace for a
+while. Another rider catches you, or you catch them, and they sit in the next
+lane for a minute before winding it on. A storm cell moves through, throwing
+lightning every ten seconds or so, with the thunder arriving a few seconds
+behind. Nothing is announced and nothing appears twice in a row.
+
 **Wet asphalt** is the one thing worth spending effort on at night. It comes from
 three parts: a roughness map that leaves puddles smoother than the tarmac around
 them, an environment map generated from the sky itself so a mirror surface has
@@ -80,6 +98,7 @@ src/
   assets.js      every texture and shared material, drawn on canvas
   bike.js        the motorcycle, the rider, the headlight, the spray
   traffic.js     pooled cars that politely move over
+  events.js      the aeroplane, the train, the other rider, the storm
   rain.js        5000 GPU-resident streaks
   sky.js         gradient dome, stars, moon, environment map
   postfx.js      bloom, radial speed blur, chromatic fringe, grain

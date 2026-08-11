@@ -133,6 +133,26 @@ export class AudioCore {
   setVolume(v) {
     this.master.gain.setTargetAtTime(v, this.t, 0.1);
   }
+
+  /** Distant thunder: noise dragged down into a long low roll. */
+  thunder() {
+    const t = this.t;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.playbackRate.value = 0.35;
+    const lp = this.filter('lowpass', 190, 1.1);
+    const g = this.gain(0);
+    src.connect(lp);
+    lp.connect(g);
+    g.connect(this.master);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.42, t + 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 3.6);
+    lp.frequency.setValueAtTime(240, t);
+    lp.frequency.exponentialRampToValueAtTime(70, t + 3.4);
+    src.start(t, Math.random() * 2);
+    src.stop(t + 3.8);
+  }
 }
 
 export const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);

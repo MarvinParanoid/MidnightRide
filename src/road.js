@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MeshBuilder, mulberry32 } from './geo.js';
+import { MeshBuilder, mulberry32, smoothstep } from './geo.js';
 import { assets } from './assets.js';
 import { decorateChunk, ChunkCtx } from './props.js';
 import { DS, N, CHUNK_LEN, ROAD_HALF, SHOULDER, AHEAD, BEHIND, BIOME } from './constants.js';
@@ -24,21 +24,64 @@ function elevationAt(s) {
   );
 }
 
-/** Which biome a chunk belongs to. Deterministic, cached, extended forward. */
+/**
+ * Which biome a chunk belongs to, and how far from anywhere it is.
+ *
+ * Beside the biome each chunk carries a "remoteness" from 0 to 1. Ordinary
+ * runs are 0. Every so often the sequencer commits to a *long haul* — ten to
+ * twenty kilometres with no city at all — and ramps remoteness up to 1 through
+ * the middle of it. Lamps thin out, traffic dries up, the sky goes properly
+ * dark, and one lone petrol station sits somewhere near the midpoint. Then it
+ * delivers you back into a city, which after all that reads as an event.
+ */
 class BiomeSequencer {
   constructor(seed = 1337) {
     this.rnd = mulberry32(seed);
     this.seq = [];
+    this.remote = [];
+    this.sinceHaul = 0;
     this.push(BIOME.CITY, 6);
   }
 
-  push(biome, len) {
-    for (let i = 0; i < len; i++) this.seq.push(biome);
+  push(biome, len, remote = 0) {
+    for (let i = 0; i < len; i++) {
+      this.seq.push(biome);
+      this.remote.push(remote);
+    }
+    this.sinceHaul += len;
   }
 
-  next() {
+  longHaul() {
+    const total = 88 + ((this.rnd() * 72) | 0);      // 10.5 – 19 km of nothing
+    const plan = [];
+    while (plan.length < total) {
+      const r = this.rnd();
+      const [biome, len] =
+        r < 0.52 ? [BIOME.HIGHWAY, 10 + ((this.rnd() * 16) | 0)]
+          : r < 0.84 ? [BIOME.FOREST, 8 + ((this.rnd() * 14) | 0)]
+            : r < 0.93 ? [BIOME.BRIDGE, 2 + ((this.rnd() * 2) | 0)]
+              : [BIOME.TUNNEL, 2 + ((this.rnd() * 2) | 0)];
+      for (let i = 0; i < len && plan.length < total; i++) plan.push(biome);
+    }
+    plan[(total * (0.35 + this.rnd() * 0.3)) | 0] = BIOME.GAS;
+
+    const ramp = Math.max(6, Math.min(20, (total * 0.22) | 0));
+    for (let i = 0; i < total; i++) {
+      this.seq.push(plan[i]);
+      this.remote.push(Math.min(smoothstep(0, ramp, i), smoothstep(0, ramp, total - 1 - i)));
+    }
+    this.sinceHaul = 0;
+    this.push(BIOME.CITY, 7 + ((this.rnd() * 7) | 0));   // the payoff
+  }
+
+  extend() {
     const last = this.seq[this.seq.length - 1];
     const r = this.rnd();
+    if (last === BIOME.CITY && this.sinceHaul > 150 && r < 0.5) return this.longHaul();
+    this.push(...this.next(last, r));
+  }
+
+  next(last, r) {
     switch (last) {
       case BIOME.CITY:
         return r < 0.34
@@ -78,8 +121,13 @@ class BiomeSequencer {
 
   at(i) {
     const idx = Math.max(0, i);
-    while (this.seq.length <= idx) this.push(...this.next());
+    while (this.seq.length <= idx) this.extend();
     return this.seq[idx];
+  }
+
+  remotenessAt(i) {
+    this.at(i);
+    return this.remote[Math.max(0, i)];
   }
 }
 
@@ -145,6 +193,20 @@ export class Road {
     return this.biomes.at(Math.floor(s / CHUNK_LEN));
   }
 
+  /** 0 = ordinary road, 1 = deep in a long haul with nothing around. */
+  remotenessAt(s) {
+    return this.biomes.remotenessAt(Math.floor(s / CHUNK_LEN));
+  }
+
+  /** Metres until the next chunk of `biome`, or Infinity if none within range. */
+  distanceTo(biome, s, maxAhead = 3000) {
+    const c0 = Math.floor(s / CHUNK_LEN);
+    for (let c = c0; c <= c0 + Math.ceil(maxAhead / CHUNK_LEN); c++) {
+      if (this.biomes.at(c) === biome) return Math.max(0, c * CHUNK_LEN - s);
+    }
+    return Infinity;
+  }
+
   static right(h, out = new THREE.Vector3()) {
     return out.set(Math.cos(h), 0, Math.sin(h));
   }
@@ -203,6 +265,7 @@ export class Road {
     const origin = new THREE.Vector3().copy(this.poseAt(sStart));
 
     const ctx = new ChunkCtx(origin, this, rnd, biome, prev, next, sStart);
+    ctx.remote = this.biomes.remotenessAt(ci);
 
     /* ── cross-sections for the carriageway ─────────────── */
     const secAsphalt = [];

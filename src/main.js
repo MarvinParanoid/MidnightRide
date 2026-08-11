@@ -7,6 +7,7 @@ import { Bike } from './bike.js';
 import { Traffic } from './traffic.js';
 import { Rain } from './rain.js';
 import { Sky } from './sky.js';
+import { Events } from './events.js';
 import { createComposer } from './postfx.js';
 import { Input } from './input.js';
 import { Hud, formatClock } from './hud.js';
@@ -14,7 +15,7 @@ import { palette, nightHourFromLocal, placeName, weatherForToday } from './timeo
 import { AudioCore } from './audio/core.js';
 import { EngineSound } from './audio/engine.js';
 import { Music } from './audio/music.js';
-import { clamp, damp, smoothstep } from './geo.js';
+import { clamp, damp } from './geo.js';
 import { assets } from './assets.js';
 
 /* ── renderer ──────────────────────────────────────────────── */
@@ -45,16 +46,7 @@ const hud = new Hud();
 const input = new Input();
 const a = assets();
 
-/* ── a rare aeroplane, because empty skies feel dead ───────── */
-const flyby = (() => {
-  const g = new THREE.Group();
-  const strobe = a.glowSprite(0xffffff, 40, 0);
-  const nav = a.glowSprite(0xff3020, 26, 0);
-  nav.position.x = 26;
-  g.add(strobe, nav);
-  scene.add(g);
-  return { group: g, strobe, nav, t: -1, next: 40 + Math.random() * 90, from: new THREE.Vector3(), to: new THREE.Vector3() };
-})();
+const events = new Events(scene, road);
 
 /* ── audio (created on the first click) ────────────────────── */
 let audio = null;
@@ -75,9 +67,8 @@ const state = {
   camMode: 0,
   photo: false,
   enclosure: 0,
+  remote: 0,          // 0 in town, 1 deep in a long empty haul
   beat: 0,
-  flash: 0,
-  thunderAt: -1,
 };
 
 const CAM_MODES = ['CHASE', 'CLOSE', 'CINEMATIC', 'FIRST PERSON'];
@@ -242,9 +233,20 @@ function updateWorld(dt, now) {
   const nightHour = nightHourFromLocal(new Date(Date.now() + state.timeOffset * 3600e3));
   const pal = palette(nightHour);
 
+  /* Out on a long haul the sky loses its orange lid and the stars come back.
+     Then, a kilometre or two before the next city, the glow returns ahead of
+     you — you see the place before you reach it. */
+  const remote = road.remotenessAt(state.s);
+  state.remote = damp(state.remote, remote, 2, dt);
+  const cityIn = road.distanceTo(BIOME.CITY, state.s, 2600);
+  const approach = 1 - clamp(cityIn / 2600, 0, 1);
+  pal.cityGlow *= clamp(0.3 + 0.7 * Math.max(1 - state.remote, approach), 0.3, 1.0);
+  pal.stars = Math.min(1, pal.stars * (1 + state.remote * 0.5));
+
   const rainAmount = state.rainOverride ?? weather.rain;
   scene.fog.color.copy(pal.fog);
-  scene.fog.density = pal.density * weather.fogMul * (1 - state.enclosure * 0.45) * (1 + rainAmount * 0.18);
+  scene.fog.density = pal.density * weather.fogMul * (1 - state.enclosure * 0.45)
+    * (1 + rainAmount * 0.18) * (1 - state.remote * 0.22);
   renderer.setClearColor(pal.fog, 1);
 
   a.asphalt.roughness = 0.5 - rainAmount * 0.26;
@@ -256,69 +258,19 @@ function updateWorld(dt, now) {
   sky.update(pal, camera.position, headingVec);
   sky.refreshEnvironment(dt);
 
-  /* distant lightning, then the thunder a beat later */
-  if (rainAmount > 0.5 && Math.random() < dt * 0.045) {
-    state.flash = 1;
-    state.thunderAt = now + 1.2 + Math.random() * 3.4;
-  }
-  state.flash = Math.max(0, state.flash - dt * 3.2);
-  if (state.flash > 0.01) {
-    const f = state.flash * (0.4 + Math.random() * 0.6);
+  const flash = events.update(dt, {
+    s: state.s, v: state.v, lat: state.lat, now, biome, remote, rain: rainAmount, audio,
+  });
+  if (flash > 0.01) {
+    const f = flash * (0.4 + Math.random() * 0.6);
     sky.ambient.intensity += f * 1.6;
     sky.uniforms.glowStrength.value += f * 2.4;
-  }
-  if (state.thunderAt > 0 && now >= state.thunderAt) {
-    state.thunderAt = -1;
-    if (audio) thunder(audio);
   }
 
   rain.update(dt, camera.position, camVel, rainAmount, state.enclosure, now);
   traffic.update(dt, state.s, state.lat, state.v);
 
-
-  /* aeroplane */
-  flyby.next -= dt;
-  if (flyby.t < 0 && flyby.next <= 0) {
-    const p = road.poseAt(state.s + 600);
-    flyby.from.set(p.x - 900, p.y + 320, p.z - 500);
-    flyby.to.set(p.x + 900, p.y + 380, p.z + 700);
-    flyby.t = 0;
-  }
-  if (flyby.t >= 0) {
-    flyby.t += dt / 42;
-    if (flyby.t > 1) {
-      flyby.t = -1;
-      flyby.next = 90 + Math.random() * 200;
-      flyby.strobe.material.opacity = 0;
-      flyby.nav.material.opacity = 0;
-    } else {
-      flyby.group.position.lerpVectors(flyby.from, flyby.to, flyby.t);
-      const fade = smoothstep(0, 0.08, flyby.t) * (1 - smoothstep(0.9, 1, flyby.t));
-      flyby.strobe.material.opacity = (Math.sin(now * 7) > 0.85 ? 1 : 0.04) * fade;
-      flyby.nav.material.opacity = 0.5 * fade * (Math.sin(now * 2.1) > 0 ? 1 : 0.3);
-    }
-  }
-
   return { pal, rainAmount, biome };
-}
-
-function thunder(core) {
-  const t = core.t;
-  const src = core.ctx.createBufferSource();
-  src.buffer = core.noise;
-  src.playbackRate.value = 0.35;
-  const lp = core.filter('lowpass', 190, 1.1);
-  const g = core.gain(0);
-  src.connect(lp);
-  lp.connect(g);
-  g.connect(core.master);
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.linearRampToValueAtTime(0.42, t + 0.35);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 3.6);
-  lp.frequency.setValueAtTime(240, t);
-  lp.frequency.exponentialRampToValueAtTime(70, t + 3.4);
-  src.start(t, Math.random() * 2);
-  src.stop(t + 3.8);
 }
 
 /* ── main loop ─────────────────────────────────────────────── */
@@ -348,9 +300,7 @@ function frame() {
     camPos.sub(off);
     camLook.sub(off);
     prevCamPos.sub(off);
-    flyby.group.position.sub(off);
-    flyby.from.sub(off);
-    flyby.to.sub(off);
+    events.rebase(off);
   }
 
   const { rainAmount, biome } = updateWorld(dt, now);
@@ -438,7 +388,7 @@ function teleport(s, v = state.v) {
 
 /* a handle for poking at the ride from the console */
 window.__mr = {
-  THREE, renderer, scene, camera, road, bike, traffic, state, teleport,
+  THREE, renderer, scene, camera, road, bike, traffic, events, state, teleport,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },

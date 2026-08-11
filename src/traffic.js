@@ -168,20 +168,23 @@ export class Traffic {
     return car;
   }
 
-  /** How busy the road feels, by biome. */
-  targetCount(biome) {
+  /** How busy the road feels, by biome — and by how far from anywhere it is. */
+  targetCount(biome, remote = 0) {
+    let n;
     switch (biome) {
-      case BIOME.CITY: return 7;
-      case BIOME.TUNNEL: return 4;
-      case BIOME.GAS: return 3;
-      case BIOME.FOREST: return 2;
-      case BIOME.BRIDGE: return 3;
-      default: return 4;
+      case BIOME.CITY: n = 7; break;
+      case BIOME.TUNNEL: n = 4; break;
+      case BIOME.GAS: n = 3; break;
+      case BIOME.FOREST: n = 2; break;
+      case BIOME.BRIDGE: n = 3; break;
+      default: n = 4;
     }
+    // deep in a long haul a single pair of tail lights becomes an event
+    return Math.max(0, Math.round(n * (1 - remote * 0.82)));
   }
 
   update(dt, sBike, latBike, speedBike) {
-    const want = this.targetCount(this.road.biomeAt(sBike));
+    const want = this.targetCount(this.road.biomeAt(sBike), this.road.remotenessAt(sBike));
 
     for (let i = this.cars.length - 1; i >= 0; i--) {
       const car = this.cars[i];

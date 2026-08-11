@@ -44,6 +44,7 @@ export class ChunkCtx {
     this.next = next;
     this.s0 = sStart;
     this.s1 = sStart + CHUNK_LEN;
+    this.remote = 0;          // set by the road: 0 near town, 1 out in the dark
     this.a = assets();
     this.builders = new Map();
     this.loose = [];
@@ -270,15 +271,31 @@ function city(ctx) {
 
 function highway(ctx) {
   const rnd = ctx.rnd;
+  const remote = ctx.remote;
   guardrail(ctx, 1);
   guardrail(ctx, -1);
 
+  /* out in the middle of a long haul the lighting all but stops, and the
+     reflector posts become the only thing showing you where the road goes */
   const ci = (ctx.s0 / CHUNK_LEN) | 0;
-  if (ci % 2 === 0) streetLamp(ctx, ctx.s0 + 4 * DS, 1);
-  if (ci % 3 === 0) streetLamp(ctx, ctx.s0 + 14 * DS, -1);
+  if (remote < 0.55) {
+    if (ci % 2 === 0) streetLamp(ctx, ctx.s0 + 4 * DS, 1);
+    if (ci % 3 === 0) streetLamp(ctx, ctx.s0 + 14 * DS, -1);
+  } else if (ci % 9 === 0) {
+    streetLamp(ctx, ctx.s0 + 9 * DS, rnd() < 0.5 ? 1 : -1);
+  }
+
+  /* someone's light, a very long way off the road */
+  if (remote > 0.4 && rnd() < 0.3) {
+    const s = ctx.s0 + rnd() * CHUNK_LEN;
+    const side = rnd() < 0.5 ? -1 : 1;
+    const far = ctx.at(s, side * (130 + rnd() * 280), 4 + rnd() * 34);
+    const warm = rnd() < 0.28;
+    ctx.halo(far, warm ? 0xff3a2a : 0xffb060, 3 + rnd() * 3.5, 0.5);
+  }
 
   // overhead gantry with a lit sign
-  if (rnd() < 0.22) {
+  if (rnd() < 0.22 * (1 - remote)) {
     const s = ctx.s0 + (6 + rnd() * 12) * DS;
     const yaw = ctx.yaw(s);
     const metal = ctx.get('metal', ctx.a.metal);
@@ -320,7 +337,7 @@ function forest(ctx) {
     fol.cone(p.x, p.y + h * 0.28, p.z, r, h * 0.5, 5);
     fol.cone(p.x, p.y + h * 0.55, p.z, r * 0.72, h * 0.45, 5);
   }
-  if (rnd() < 0.3) streetLamp(ctx, ctx.s0 + 10 * DS, rnd() < 0.5 ? 1 : -1);
+  if (rnd() < 0.3 * (1 - ctx.remote)) streetLamp(ctx, ctx.s0 + 10 * DS, rnd() < 0.5 ? 1 : -1);
 }
 
 function tunnel(ctx) {
