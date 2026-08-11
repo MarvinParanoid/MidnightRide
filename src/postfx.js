@@ -68,15 +68,21 @@ const GradeShader = {
   `,
 };
 
-export function createComposer(renderer, scene, camera) {
+export function createComposer(renderer, scene, camera, quality = {}) {
+  const { bloomScale = 1, samples = 2 } = quality;
   const size = renderer.getSize(new THREE.Vector2());
   const composer = new EffectComposer(
     renderer,
-    new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 2 })
+    new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples })
   );
   composer.addPass(new RenderPass(scene, camera));
 
-  const bloom = new UnrealBloomPass(size, 0.95, 0.72, 0.42);
+  /* The bloom chain can run at half resolution without anyone noticing — but
+     its radius is in buffer pixels, so at half res the same number smears
+     twice as far across the screen. Scale it back down to match. */
+  const bloom = new UnrealBloomPass(
+    size.clone().multiplyScalar(bloomScale), 0.95, 0.72 * (0.35 + 0.65 * bloomScale), 0.42
+  );
   composer.addPass(bloom);
 
   const grade = new ShaderPass(GradeShader);

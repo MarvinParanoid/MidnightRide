@@ -7,11 +7,15 @@ const MAP = {
   Space: 'stoppie',
 };
 
+export const isTouchDevice =
+  typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches;
+
 export class Input {
   constructor(target = window) {
     this.held = new Set();
     this.taps = new Map();
-    this.touch = null;
+    this.pointers = new Map();
+    this.touch = { steer: 0, throttle: 0, brake: 0 };
 
     target.addEventListener('keydown', (e) => {
       if (e.repeat) return;
@@ -34,24 +38,72 @@ export class Input {
 
     target.addEventListener('blur', () => this.held.clear());
 
-    /* touch: left half steers, right half is throttle, two fingers brake */
+    this.bindTouch();
+  }
+
+  /**
+   * Relative drag, not absolute position. The first version steered by where
+   * on the screen your thumb was, which means the bike snaps sideways the
+   * instant you touch it — unusable. Now each touch remembers where it began
+   * and only the movement from there counts, so you can put your thumb down
+   * anywhere and the bike keeps doing what it was doing.
+   *
+   * Left half steers. Right half is throttle and brake: hold to accelerate,
+   * drag down to brake.
+   */
+  bindTouch() {
     const canvas = document.getElementById('scene');
-    if (canvas) {
-      const onTouch = (e) => {
-        e.preventDefault();
-        const w = window.innerWidth;
-        let steer = 0, throttle = false, brake = false;
-        for (const t of e.touches) {
-          if (t.clientX < w * 0.5) steer = ((t.clientX / (w * 0.5)) - 0.5) * 2;
-          else if (t.clientY > window.innerHeight * 0.6) brake = true;
-          else throttle = true;
-        }
-        this.touch = e.touches.length ? { steer, throttle, brake } : null;
-      };
-      canvas.addEventListener('touchstart', onTouch, { passive: false });
-      canvas.addEventListener('touchmove', onTouch, { passive: false });
-      canvas.addEventListener('touchend', onTouch, { passive: false });
+    if (!canvas) return;
+
+    const start = (e) => {
+      for (const t of e.changedTouches) {
+        this.pointers.set(t.identifier, {
+          role: t.clientX < innerWidth * 0.5 ? 'steer' : 'drive',
+          x0: t.clientX, y0: t.clientY, x: t.clientX, y: t.clientY,
+        });
+      }
+      this.applyTouch();
+      e.preventDefault();
+    };
+
+    const move = (e) => {
+      for (const t of e.changedTouches) {
+        const p = this.pointers.get(t.identifier);
+        if (!p) continue;
+        p.x = t.clientX;
+        p.y = t.clientY;
+      }
+      this.applyTouch();
+      e.preventDefault();
+    };
+
+    const end = (e) => {
+      for (const t of e.changedTouches) this.pointers.delete(t.identifier);
+      this.applyTouch();
+      e.preventDefault();
+    };
+
+    canvas.addEventListener('touchstart', start, { passive: false });
+    canvas.addEventListener('touchmove', move, { passive: false });
+    canvas.addEventListener('touchend', end, { passive: false });
+    canvas.addEventListener('touchcancel', end, { passive: false });
+  }
+
+  applyTouch() {
+    let steer = 0, throttle = 0, brake = 0;
+    const steerSpan = Math.max(90, innerWidth * 0.16);
+    const driveSpan = Math.max(70, innerHeight * 0.14);
+
+    for (const p of this.pointers.values()) {
+      if (p.role === 'steer') {
+        steer = Math.max(-1, Math.min(1, (p.x - p.x0) / steerSpan));
+      } else {
+        const dy = p.y0 - p.y;
+        if (dy < -10) brake = Math.min(1, -dy / driveSpan);
+        else throttle = dy > 10 ? Math.min(1, dy / driveSpan) : 1;   // a held thumb just rides
+      }
     }
+    this.touch = { steer, throttle, brake };
   }
 
   /** Fire `cb` once per press of a physical key. */
@@ -60,11 +112,12 @@ export class Input {
   }
 
   get throttle() {
-    return this.held.has('throttle') || this.touch?.throttle ? 1 : 0;
+    return this.held.has('throttle') ? 1 : this.touch.throttle;
   }
 
   get brake() {
-    return (this.held.has('brake') || this.touch?.brake ? 1 : 0) + (this.held.has('stoppie') ? 1 : 0);
+    return Math.min(1,
+      (this.held.has('brake') ? 1 : 0) + (this.held.has('stoppie') ? 1 : 0) + this.touch.brake);
   }
 
   get boost() {
@@ -72,7 +125,12 @@ export class Input {
   }
 
   get steer() {
-    if (this.touch) return Math.max(-1, Math.min(1, this.touch.steer));
-    return (this.held.has('right') ? 1 : 0) - (this.held.has('left') ? 1 : 0);
+    const keys = (this.held.has('right') ? 1 : 0) - (this.held.has('left') ? 1 : 0);
+    return keys || this.touch.steer;
+  }
+
+  /** True while the rider is actually asking for something. */
+  get active() {
+    return this.throttle > 0.01 || this.brake > 0.01 || Math.abs(this.steer) > 0.01 || this.boost;
   }
 }

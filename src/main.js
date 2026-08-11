@@ -9,7 +9,9 @@ import { Rain } from './rain.js';
 import { Sky } from './sky.js';
 import { Events } from './events.js';
 import { createComposer } from './postfx.js';
-import { Input } from './input.js';
+import { Input, isTouchDevice } from './input.js';
+import { Autopilot } from './autopilot.js';
+import { detectQuality } from './quality.js';
 import { Hud, formatClock } from './hud.js';
 import { palette, nightHourFromLocal, placeName, weatherForToday } from './timeofday.js';
 import { AudioCore } from './audio/core.js';
@@ -20,8 +22,9 @@ import { assets } from './assets.js';
 
 /* ── renderer ──────────────────────────────────────────────── */
 const canvas = document.getElementById('scene');
+const quality = detectQuality();
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+renderer.setPixelRatio(Math.min(devicePixelRatio, quality.pixelRatio));
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
@@ -33,17 +36,18 @@ scene.fog = new THREE.FogExp2(0x06070f, 0.0066);
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.4, 5200);
 camera.position.set(0, 3, 8);
 
-const { composer, bloom, grade } = createComposer(renderer, scene, camera);
+const { composer, bloom, grade } = createComposer(renderer, scene, camera, quality);
 
 /* ── world ─────────────────────────────────────────────────── */
 const road = new Road(scene);
 const bike = new Bike(scene);
 const traffic = new Traffic(scene, road);
-const rain = new Rain(scene);
+const rain = new Rain(scene, quality.rainDrops);
 const sky = new Sky(scene);
-sky.attachEnvironment(renderer, scene);
+sky.attachEnvironment(renderer, scene, quality.envEvery);
 const hud = new Hud();
 const input = new Input();
+if (isTouchDevice) hud.setTouch(() => setAuto(!state.auto));
 const a = assets();
 
 const events = new Events(scene, road);
@@ -69,6 +73,10 @@ const state = {
   enclosure: 0,
   remote: 0,          // 0 in town, 1 deep in a long empty haul
   beat: 0,
+  rain: 0,
+  auto: false,        // autopilot has the controls
+  lastInput: 0,
+  autoCamT: 0,
 };
 
 const CAM_MODES = ['CHASE', 'CLOSE', 'CINEMATIC', 'FIRST PERSON'];
@@ -85,9 +93,52 @@ const camVel = new THREE.Vector3();
 const headingVec = new THREE.Vector3(0, 0, -1);
 const camLookPose = {};
 
+/* ── autopilot ─────────────────────────────────────────────── */
+const auto = new Autopilot();
+const IDLE_BEFORE_AUTO = 25;      // seconds of hands off before it takes over
+
+function setAuto(on) {
+  if (state.auto === on) return;
+  state.auto = on;
+  if (on) {
+    auto.reset(state);
+    state.autoCamT = 30;
+  }
+  hud.setAuto(on);
+  hud.toast(on ? 'AUTOPILOT' : 'MANUAL');
+  state.lastInput = performance.now() / 1000;
+}
+
+/**
+ * One place decides who is driving. Any input from the rider takes the controls
+ * back immediately; leave them alone for a while and it takes them again, which
+ * turns the game into something you can just leave running.
+ */
+function controls(dt, now) {
+  if (input.active) {
+    state.lastInput = now;
+    if (state.auto) setAuto(false);
+  } else if (!state.auto && running && now - state.lastInput > IDLE_BEFORE_AUTO) {
+    setAuto(true);
+  }
+
+  if (state.auto) {
+    // hands off, so the camera wanders too — this is the mode you leave running
+    state.autoCamT -= dt;
+    if (state.autoCamT <= 0) {
+      state.autoCamT = 30 + Math.random() * 30;
+      state.camMode = (state.camMode + 1) % CAM_MODES.length;
+    }
+    return auto.update(dt, state, road, traffic, { rain: state.rain });
+  }
+  return { throttle: input.throttle, brake: clamp(input.brake, 0, 1), steer: input.steer, boost: input.boost };
+}
+
 /* ── controls ──────────────────────────────────────────────── */
+input.on('KeyE', () => setAuto(!state.auto));
 input.on('KeyC', () => {
   state.camMode = (state.camMode + 1) % CAM_MODES.length;
+  state.autoCamT = 45;          // don't yank a camera you just chose
   hud.toast(CAM_MODES[state.camMode]);
 });
 input.on('KeyF', () => {
@@ -121,6 +172,9 @@ async function begin() {
   traffic.onPass = (i) => engine && engine.whoosh(i);
   await audio.start();
   hud.toast(`${place.toUpperCase()} · ${weather.name.toUpperCase()}`);
+  state.lastInput = performance.now() / 1000;   // the idle clock starts now
+  // a phone should start by showing you the ride, not asking you to drive it
+  if (isTouchDevice) setAuto(true);
 }
 document.addEventListener('pointerdown', begin, { once: true });
 document.addEventListener('keydown', (e) => {
@@ -137,11 +191,11 @@ addEventListener('resize', () => {
 /* ── simulation ────────────────────────────────────────────── */
 const V_REF = 88;      // where the engine runs out of pull, m/s
 
-function drive(dt) {
-  const boost = input.boost ? 1.32 : 1;
-  state.throttle = damp(state.throttle, input.throttle, 7, dt);
-  state.brake = damp(state.brake, clamp(input.brake, 0, 1), 12, dt);
-  state.steer = damp(state.steer, input.steer, 6.5, dt);
+function drive(dt, c) {
+  const boost = c.boost ? 1.32 : 1;
+  state.throttle = damp(state.throttle, c.throttle, 7, dt);
+  state.brake = damp(state.brake, clamp(c.brake, 0, 1), 12, dt);
+  state.steer = damp(state.steer, c.steer, 6.5, dt);
 
   const v = state.v;
   const offRoad = Math.abs(state.lat) > ROAD_HALF + SHOULDER;
@@ -210,7 +264,7 @@ function updateCamera(dt) {
   camera.lookAt(camLook);
   camera.rotateZ(bike.leanAngle * (mode === 3 ? 0.55 : 0.16));
 
-  const targetFov = fov + (input.boost ? 5 : 0);
+  const targetFov = fov + (state.throttle > 0.9 && input.boost ? 5 : 0);
   camera.fov = damp(camera.fov, targetFov, 3.5, dt);
   camera.updateProjectionMatrix();
 
@@ -244,6 +298,7 @@ function updateWorld(dt, now) {
   pal.stars = Math.min(1, pal.stars * (1 + state.remote * 0.5));
 
   const rainAmount = state.rainOverride ?? weather.rain;
+  state.rain = rainAmount;
   scene.fog.color.copy(pal.fog);
   scene.fog.density = pal.density * weather.fogMul * (1 - state.enclosure * 0.45)
     * (1 + rainAmount * 0.18) * (1 - state.remote * 0.22);
@@ -288,7 +343,7 @@ function frame() {
   renderer.info.reset();   // autoReset is off, so stats cover the whole frame
   if (!running) dt = Math.min(dt, 1 / 60);
 
-  if (running) drive(dt);
+  if (running) drive(dt, controls(dt, now));
 
   road.update(state.s);
 
@@ -388,7 +443,7 @@ function teleport(s, v = state.v) {
 
 /* a handle for poking at the ride from the console */
 window.__mr = {
-  THREE, renderer, scene, camera, road, bike, traffic, events, state, teleport,
+  THREE, renderer, scene, camera, road, bike, traffic, events, input, state, teleport, setAuto,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },

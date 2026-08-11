@@ -18,10 +18,12 @@ export class Hud {
       <div class="pane tr">
         <div><kbd>W</kbd> / <kbd>S</kbd> throttle · brake</div>
         <div><kbd>A</kbd> / <kbd>D</kbd> steer</div>
-        <div><kbd>Shift</kbd> boost</div>
+        <div><kbd>Shift</kbd> boost · <kbd>E</kbd> autopilot</div>
         <div><kbd>C</kbd> camera · <kbd>F</kbd> photo</div>
         <div><kbd>R</kbd> rain · <kbd>M</kbd> music · <kbd>T</kbd> time</div>
       </div>
+      <div class="auto" data-autoflag>AUTOPILOT</div>
+      <button class="chip" data-auto type="button">AUTO</button>
       <div class="toast" data-toast></div>
     `;
     this.root = root;
@@ -38,6 +40,8 @@ export class Hud {
       odo: q('[data-odo]'),
       bpm: q('[data-bpm]'),
       toast: q('[data-toast]'),
+      autoFlag: q('[data-autoflag]'),
+      chip: q('[data-auto]'),
     };
     this.toastT = 0;
     this.lastSpeed = -1;
@@ -47,13 +51,35 @@ export class Hud {
     this.start.innerHTML = `
       <h1>MIDNIGHT RIDE</h1>
       <div class="sub" data-startsub>—</div>
-      <div class="keys">
+      <div class="keys" data-startkeys>
         W / S throttle &amp; brake · A / D steer · Shift boost<br />
-        C camera · F photo mode · R rain · M music
+        E autopilot · C camera · F photo mode · R rain · M music
       </div>
-      <div class="go">click anywhere to ride</div>
+      <div class="go" data-startgo>click anywhere to ride</div>
     `;
     document.body.appendChild(this.start);
+
+    this.rotate = document.createElement('div');
+    this.rotate.className = 'rotate';
+    this.rotate.textContent = 'turn your phone';
+    document.body.appendChild(this.rotate);
+  }
+
+  /** Touch layout: on-screen autopilot toggle, thumb-zone instructions. */
+  setTouch(onToggleAuto) {
+    document.body.classList.add('touch');
+    this.el.chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onToggleAuto();
+    });
+    this.start.querySelector('[data-startkeys]').innerHTML =
+      'left thumb steers · right thumb rides<br />AUTO lets it ride itself';
+    this.start.querySelector('[data-startgo]').textContent = 'tap anywhere to ride';
+  }
+
+  setAuto(on) {
+    this.el.autoFlag.classList.toggle('on', on);
+    this.el.chip.classList.toggle('on', on);
   }
 
   setIntro(text) {

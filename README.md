@@ -16,13 +16,38 @@ npm run dev      # http://127.0.0.1:5173
 | `W` / `S` | throttle · brake |
 | `A` / `D` | steer |
 | `Shift` | boost |
+| `E` | autopilot |
 | `C` | camera (chase · close · cinematic · first person) |
 | `F` | photo mode — hides the interface |
 | `R` | cycle the rain |
 | `M` | music on/off |
 | `T` | push the clock forward an hour |
 
-On a touch screen: left half steers, upper right is throttle, lower right brakes.
+## Riding itself
+
+Leave the controls alone for twenty-five seconds and it takes over: holds a
+lane, reads the next corner and arrives at a speed the corner allows, pulls out
+for slower traffic, and drifts the camera between angles every half minute.
+Touch anything and you have it back instantly, no confirmation, no transition.
+`E` toggles it deliberately.
+
+It is not an easy mode — there is nothing to be good at here. It is for the
+times you want to watch rather than steer, and it is what makes the game
+something you can leave running on a second screen.
+
+## On a phone
+
+It starts in autopilot, because being handed a throttle is not what you want
+from a thing you opened on a phone. `AUTO` in the corner toggles it.
+
+To ride yourself: **left thumb steers, right thumb rides.** Both are relative —
+each touch remembers where it began, so you can put a thumb down anywhere
+without the bike snapping sideways, and a resting thumb on the right just holds
+the throttle open. Drag down on the right to brake.
+
+Small screens also get a lighter build automatically: no pixel-ratio scaling,
+a third of the rain, a half-resolution bloom chain and a slower environment
+refresh. Landscape only — portrait asks you to turn the phone.
 
 ## What is generated, and when
 
@@ -104,7 +129,9 @@ src/
   postfx.js      bloom, radial speed blur, chromatic fringe, grain
   timeofday.js   clock → palette; time zone → place; day → weather
   hud.js         the interface
-  input.js       keyboard and touch
+  input.js       keyboard and relative-drag touch
+  autopilot.js   rides for you when you stop
+  quality.js     what to cut on a small device
   audio/
     core.js      context, bus, convolution reverb, noise
     engine.js    engine, wind, tyres, rain, whoosh
