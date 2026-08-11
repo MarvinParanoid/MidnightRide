@@ -18,7 +18,7 @@ import { palette, nightHourFromLocal, placeName, weatherForToday } from './timeo
 import { AudioCore } from './audio/core.js';
 import { EngineSound } from './audio/engine.js';
 import { Music } from './audio/music.js';
-import { clamp, damp } from './geo.js';
+import { clamp, damp, smoothstep } from './geo.js';
 import { assets } from './assets.js';
 
 /* ── renderer ──────────────────────────────────────────────── */
@@ -112,6 +112,20 @@ const prevCamPos = new THREE.Vector3();
 const camVel = new THREE.Vector3();
 const headingVec = new THREE.Vector3(0, 0, -1);
 const camLookPose = {};
+const lampPos = new THREE.Vector3();
+
+/** 1 when the beam should be at full strength, ~0 when the camera is staring
+    down the barrel of the headlight from a few metres away. */
+function beamFade(bikePos, heading) {
+  const fx = Math.sin(heading);
+  const fz = -Math.cos(heading);
+  lampPos.set(bikePos.x + fx * 0.72, bikePos.y + 0.88, bikePos.z + fz * 0.72);
+  const d = camera.position.distanceTo(lampPos);
+  const ahead = ((camera.position.x - lampPos.x) * fx + (camera.position.z - lampPos.z) * fz) / Math.max(d, 1e-3);
+  const inFront = clamp((ahead - 0.05) / 0.45, 0, 1);
+  const near = 1 - smoothstep(6, 26, d);
+  return 1 - inFront * near * 0.95;
+}
 
 /* ── autopilot ─────────────────────────────────────────────── */
 const auto = new Autopilot();
@@ -481,6 +495,7 @@ function frame() {
     rpm: engine ? engine.rpm : 1200,
     rain: rainAmount,
     wobble: offRoad ? Math.sin(now * 42) * state.v : 0,
+    beamFade: beamFade(tmpA, p.h),
   });
 
   if (photo.active) photo.update(dt, tmpA);
@@ -555,6 +570,7 @@ function teleport(s, v = state.v) {
   state.v = v;
   prevV = v;
   accelSm = 0;
+  road.seek(s);          // may be a jump backwards, out of the retained window
   road.update(s);
   road.point(s - cam.back, state.lat, cam.h, camPos);
   road.point(s + cam.ahead, state.lat, 1.35, camLook);

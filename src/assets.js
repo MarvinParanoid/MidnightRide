@@ -163,7 +163,12 @@ export function assets() {
     ground: new THREE.MeshStandardMaterial({
       color: 0x05060a, roughness: 1.0, metalness: 0.0, emissive: 0x04060e, emissiveIntensity: 1,
     }),
-    concrete: new THREE.MeshStandardMaterial({ color: 0x0e1015, roughness: 0.78, metalness: 0.14 }),
+    /* Double-sided on purpose: a tunnel is a shell you stand inside, and the
+       ribbons that make it wind outward, so single-sided walls and ceiling are
+       invisible from the one place you ever see them from. */
+    concrete: new THREE.MeshStandardMaterial({
+      color: 0x0e1015, roughness: 0.78, metalness: 0.14, side: THREE.DoubleSide,
+    }),
     metal: new THREE.MeshStandardMaterial({ color: 0x232936, roughness: 0.34, metalness: 0.92 }),
     // a touch of self-illumination so building masses read against the sky
     dark: new THREE.MeshStandardMaterial({

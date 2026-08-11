@@ -170,6 +170,31 @@ export class Road {
     return this.samples[Math.max(0, Math.min(this.samples.length - 1, i))];
   }
 
+  /**
+   * Jump the centreline to an arbitrary distance, forwards or backwards.
+   *
+   * Samples behind the rider are thrown away as you ride, so asking for one
+   * again — which only happens if something moves you backwards — used to clamp
+   * to the oldest surviving sample. Every pose then collapsed onto the same
+   * point and the camera ended up inside a degenerate world with no error to
+   * show for it. This rebuilds instead: heading is re-integrated from zero
+   * (cheap, and the only quantity with history), position restarts at the
+   * origin, which is fine because the world is rebased on long rides anyway.
+   */
+  seek(s) {
+    const idx = Math.floor(s / DS);
+    const last = this.first + this.samples.length - 1;
+    if (idx >= this.first && idx <= last + 4000) return false;
+
+    let h = 0;
+    for (let i = 0; i < idx; i++) h += curvatureAt(i * DS) * DS;
+    this.first = idx;
+    this.samples = [{ x: 0, y: elevationAt(idx * DS), z: 0, h }];
+    for (const chunk of this.chunks.values()) this.disposeChunk(chunk);
+    this.chunks.clear();
+    return true;
+  }
+
   /** Interpolated centreline pose at distance `s` (metres). */
   poseAt(s, out = {}) {
     const f = s / DS;

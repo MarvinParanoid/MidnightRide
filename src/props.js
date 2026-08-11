@@ -7,8 +7,11 @@ import { BIOME, ROAD_HALF, SHOULDER, DS, N, CHUNK_LEN } from './constants.js';
    its local +X is then the road's right vector and -Z is forward. */
 
 const emissiveCache = new Map();
-function emissiveMat(hex, intensity, map = null) {
-  const key = `${hex}|${intensity}|${map ? 'm' : ''}`;
+/* The map has to be part of the key. Keying on "has a map" alone means a pool
+   and a smear of the same colour and strength silently share one material, and
+   whichever was built first decides how both of them fade. */
+function emissiveMat(hex, intensity, map = null, mapKey = '') {
+  const key = `${hex}|${intensity}|${mapKey}`;
   let m = emissiveCache.get(key);
   if (!m) {
     m = new THREE.MeshBasicMaterial({
@@ -67,12 +70,12 @@ export class ChunkCtx {
 
   /** A light band smeared down the wet road — fades away from its centreline. */
   smear(hex, intensity = 1) {
-    return this.get(`s${hex}_${intensity}`, emissiveMat(hex, intensity, this.a.tex.band));
+    return this.get(`s${hex}_${intensity}`, emissiveMat(hex, intensity, this.a.tex.band, 'band'));
   }
 
   /** A soft pool of reflected light — fades in every direction. */
   pool(hex, intensity = 1) {
-    return this.get(`p${hex}_${intensity}`, emissiveMat(hex, intensity, this.a.tex.glow));
+    return this.get(`p${hex}_${intensity}`, emissiveMat(hex, intensity, this.a.tex.glow, 'glow'));
   }
 
   pose(s) {
@@ -371,7 +374,10 @@ function tunnel(ctx) {
     const band = [];
     for (let i = 0; i <= N; i++) {
       const s = ctx.s0 + i * DS;
-      band.push({ l: ctx.at(s, side * (wallLat - 0.05), 2.55), r: ctx.at(s, side * (wallLat - 0.05), 2.3) });
+      /* Well above eye level. At camera height a thin horizontal strip
+         projects to a dead-flat line straight across the picture, which reads
+         as a rendering fault rather than as a light on a wall. */
+      band.push({ l: ctx.at(s, side * (wallLat - 0.05), 3.9), r: ctx.at(s, side * (wallLat - 0.05), 3.62) });
     }
     ctx.emit(0xff7a2a, 0.8).ribbon(band, 0.1);
     const smear = [];

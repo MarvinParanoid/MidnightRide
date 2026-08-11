@@ -220,9 +220,14 @@ export class Bike {
     this.exhaustGlow.material.opacity = Math.pow(revs, 2.4) * 0.75 * throttle;
     this.exhaustGlow.scale.setScalar(0.35 + revs * 0.4);
 
+    /* Look into a headlight from two metres and it is, correctly, blinding —
+       but that turns photo mode into a white rectangle. Fade the beam volume
+       when the camera is close and in front of it. */
+    const fade = st.beamFade ?? 1;
     this.headMat.color.copy(neon(0xfff0d8, 2.4 + Math.sin(performance.now() * 0.021) * 0.1));
     this.spot.intensity = 110 + rain * 30;
-    for (const b of this.beams) b.material.uniforms.opacity.value = 0.014 + rain * 0.03;
+    for (const b of this.beams) b.material.uniforms.opacity.value = (0.014 + rain * 0.03) * fade;
+    this.headGlow.material.opacity = 0.5 * (0.35 + 0.65 * fade);
 
     const braking = brake > 0.05;
     this.tailMat.color.copy(neon(0xff1030, braking ? 5 : 1.6));
