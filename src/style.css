@@ -127,7 +127,8 @@ html, body {
   box-shadow: 0 0 26px rgba(87, 232, 255, 0.5);
 }
 body.touch .chip { display: block; }
-body.touch .tr { display: none; }
+body.touch .tr, body.nohints .tr { display: none; }
+body.nohints .auto { display: none; }   /* a recording shouldn't advertise the autopilot */
 
 /* ── phones ───────────────────────────────────────────────── */
 .rotate { display: none; }

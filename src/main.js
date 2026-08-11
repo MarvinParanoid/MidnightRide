@@ -106,7 +106,7 @@ function setAuto(on) {
   }
   hud.setAuto(on);
   hud.toast(on ? 'AUTOPILOT' : 'MANUAL');
-  state.lastInput = performance.now() / 1000;
+  state.lastInput = clock;
 }
 
 /**
@@ -172,7 +172,7 @@ async function begin() {
   traffic.onPass = (i) => engine && engine.whoosh(i);
   await audio.start();
   hud.toast(`${place.toUpperCase()} · ${weather.name.toUpperCase()}`);
-  state.lastInput = performance.now() / 1000;   // the idle clock starts now
+  state.lastInput = clock;   // the idle clock starts now
   // a phone should start by showing you the ride, not asking you to drive it
   if (isTouchDevice) setAuto(true);
 }
@@ -328,20 +328,68 @@ function updateWorld(dt, now) {
   return { pal, rainAmount, biome };
 }
 
+/* ── recording ─────────────────────────────────────────────────
+   Capturing a clip from a browser is normally hopeless: the renderer runs at
+   whatever speed the machine manages, and a screenshot takes far longer than a
+   frame, so you get a stuttering mess. Here the simulation runs on a fixed
+   timestep instead of the wall clock, and the loop stops after every frame
+   until the capture tool asks for the next one. The machine can take a second
+   per frame; the clip still comes out at an exact, smooth 30 fps.            */
+const record = {
+  active: false,
+  dt: 1 / 30,
+  /* Film grain re-randomises every pixel every frame, which is exactly the
+     thing inter-frame compression cannot cope with — leaving it on multiplies
+     the size of a GIF several times over. Off by default while recording. */
+  grain: 0,
+  resolve: null,
+  begin(opts = {}) {
+    this.active = true;
+    this.dt = 1 / (opts.fps || 30);
+    this.grain = opts.grain ?? 0;
+    if (opts.auto !== undefined) setAuto(opts.auto);
+    if (opts.camMode !== undefined) state.camMode = opts.camMode;
+    if (opts.hud === false) hud.photo(true);
+    if (opts.hints === false) document.body.classList.add('nohints');
+    state.autoCamT = opts.camCycle === false ? 1e9 : state.autoCamT;
+    return true;
+  },
+  /** Advance exactly one frame and resolve once it has been rendered. */
+  next() {
+    return new Promise((r) => {
+      this.resolve = r;
+      setTimeout(frame, 0);
+    });
+  },
+  finish() {
+    const r = this.resolve;
+    this.resolve = null;
+    if (r) r();
+  },
+  end() {
+    this.active = false;
+    hud.photo(state.photo);
+    document.body.classList.remove('nohints');
+    requestAnimationFrame(frame);
+  },
+};
+
 /* ── main loop ─────────────────────────────────────────────── */
 let last = performance.now() / 1000;
+let clock = 0;                 // simulation time; the wall clock in normal play
 let clockTick = 0;
 let clockStr = formatClock();
 let fps = 0;
 
 function frame() {
-  requestAnimationFrame(frame);
-  const now = performance.now() / 1000;
-  let dt = Math.min(0.05, now - last);
-  last = now;
+  const wall = performance.now() / 1000;
+  let dt = record.active ? record.dt : Math.min(0.05, wall - last);
+  last = wall;
   fps = fps ? fps * 0.94 + (1 / Math.max(dt, 1e-4)) * 0.06 : 1 / Math.max(dt, 1e-4);
   renderer.info.reset();   // autoReset is off, so stats cover the whole frame
   if (!running) dt = Math.min(dt, 1 / 60);
+  clock += dt;
+  const now = clock;
 
   if (running) drive(dt, controls(dt, now));
 
@@ -400,7 +448,7 @@ function frame() {
   grade.uniforms.uTime.value = now;
   grade.uniforms.uSpeed.value = Math.pow(speed01, 1.6);
   grade.uniforms.uWet.value = rainAmount * clamp(state.v / 40, 0, 1) * 0.55;
-  grade.uniforms.uGrain.value = state.photo ? 0.006 : 0.014;
+  grade.uniforms.uGrain.value = (state.photo ? 0.006 : 0.014) * (record.active ? record.grain : 1);
 
   composer.render();
 
@@ -422,6 +470,9 @@ function frame() {
     odo: state.odo,
     bpm: music ? music.bpm : 84,
   });
+
+  if (record.active) record.finish();
+  else requestAnimationFrame(frame);
 }
 
 /* prime a few chunks before the first frame so the road is already there */
@@ -443,7 +494,8 @@ function teleport(s, v = state.v) {
 
 /* a handle for poking at the ride from the console */
 window.__mr = {
-  THREE, renderer, scene, camera, road, bike, traffic, events, input, state, teleport, setAuto,
+  THREE, renderer, scene, camera, road, bike, traffic, events, input, state,
+  teleport, setAuto, record,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },

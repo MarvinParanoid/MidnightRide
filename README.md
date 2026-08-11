@@ -1,5 +1,7 @@
 # Midnight Ride
 
+![a ride through the city at night](docs/ride.gif)
+
 An endless night ride. You get a motorcycle, a wet road, a city that keeps
 rebuilding itself ahead of you, and music that follows the throttle. There is no
 score, no fail state and nothing to unlock. You ride until you feel like stopping.
@@ -137,6 +139,31 @@ src/
     engine.js    engine, wind, tyres, rain, whoosh
     music.js     the generative synthwave sequencer
 ```
+
+## Recording
+
+```bash
+npm run dev                                  # in another terminal
+npm run record -- --seconds 4 --webp --mp4   # writes docs/ride.*
+```
+
+Capturing from a browser normally produces a stuttering mess, because the
+renderer runs at whatever speed the machine manages while a screenshot takes far
+longer than a frame. So recording switches the simulation to a fixed timestep
+and stops the loop after every frame until the capture asks for the next one.
+The machine can take half a second per frame and the clip still comes out at an
+exact, smooth 20 fps.
+
+Two non-obvious things dominate the size of the resulting GIF. Film grain is the
+first — it re-randomises every pixel every frame and defeats inter-frame
+compression entirely, so it is switched off while recording (24 MB → 9.7 MB on
+the first clip). Dithering is the second: coarse ordered dithering compresses
+well but turns every lamp halo into concentric rings, so the encoder uses the
+finest bayer pattern, which stays cheap because the pattern itself does not
+change between frames.
+
+`docs/ride.webp` is the same clip at a quarter of the size and a wider frame —
+worth swapping into the README if everywhere you care about renders WebP.
 
 ## Console handle
 
