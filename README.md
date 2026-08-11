@@ -8,8 +8,16 @@ score, no fail state and nothing to unlock. You ride until you feel like stoppin
 
 ```bash
 npm install
-npm run dev      # http://127.0.0.1:5173
+npm run dev          # http://127.0.0.1:5173
+npm run build        # github pages build, into dist/
+npm run build:itch   # itch.io upload, into midnight-ride-itch.zip
 ```
+
+There are three builds and they differ only in where the page thinks it lives:
+the dev server at the root, GitHub Pages at `/MidnightRide/`, and itch.io at a
+generated path nobody knows in advance — so that one uses relative paths. Getting
+this wrong produces a blank screen and a 404 for the bundle, which looks exactly
+like a broken game.
 
 ## Controls
 
