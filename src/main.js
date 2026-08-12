@@ -267,7 +267,10 @@ function drive(dt, c) {
   /* the corner throws you toward the outside line */
   const k = road.curvature(state.s);
   state.lat -= k * state.v * state.v * 0.16 * dt;
-  state.lat = clamp(state.lat, -12.5, 12.5);
+  /* You can put a wheel on the verge, but not drive out across the field: the
+     bike rides at road height and the ground beside it is a metre lower, so
+     far off the tarmac it visibly floats. The drag out here does the rest. */
+  state.lat = clamp(state.lat, -9.6, 9.6);
 
   const ds = state.v * dt;
   state.s += ds;
@@ -487,6 +490,7 @@ function frame() {
   const p = road.poseAt(state.s);
   bike.setPose(tmpA, p.h, p.pitch);
   const offRoad = Math.abs(state.lat) > ROAD_HALF + SHOULDER;
+  bike.setFirstPerson(state.camMode === 3 && !photo.active);
   bike.update(simDt, {
     speed: state.v,
     steer: state.steer,

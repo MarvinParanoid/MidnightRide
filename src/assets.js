@@ -173,7 +173,9 @@ export function assets() {
     // a touch of self-illumination so building masses read against the sky
     dark: new THREE.MeshStandardMaterial({
       color: 0x090a10, roughness: 0.85, metalness: 0.25,
-      emissive: 0x080b16, emissiveIntensity: 1, envMapIntensity: 0.35,
+      // low enough that walls stay silhouettes: at higher values a flat face
+      // picks up the whole sky and reads as an untextured purple panel
+      emissive: 0x080b16, emissiveIntensity: 1, envMapIntensity: 0.16,
     }),
     foliage: new THREE.MeshStandardMaterial({ color: 0x080f0d, roughness: 1.0, metalness: 0.0 }),
     water: new THREE.MeshStandardMaterial({ color: 0x02030a, roughness: 0.08, metalness: 1.0 }),

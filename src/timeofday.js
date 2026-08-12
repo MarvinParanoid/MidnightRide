@@ -16,8 +16,8 @@ export function nightHourFromLocal(date = new Date()) {
 
 const KEYS = [
   // t is "hours since 18:00", so 25 = 01:00, 30 = 06:00
-  { t: 18.0, top: 0x0a1030, bot: 0x412454, glow: 0xff6a3d, fog: 0x241a3a, dens: 0.0052, amb: 0.34, moon: 0.25, stars: 0.15, city: 0.55 },
-  { t: 20.0, top: 0x05081c, bot: 0x171438, glow: 0xff3f72, fog: 0x121028, dens: 0.0060, amb: 0.24, moon: 0.45, stars: 0.55, city: 0.9 },
+  { t: 18.0, top: 0x0a1030, bot: 0x412454, glow: 0xe0663f, fog: 0x241a3a, dens: 0.0052, amb: 0.34, moon: 0.25, stars: 0.15, city: 0.55 },
+  { t: 20.0, top: 0x05081c, bot: 0x171438, glow: 0xd4436b, fog: 0x121028, dens: 0.0060, amb: 0.24, moon: 0.45, stars: 0.55, city: 0.9 },
   { t: 22.0, top: 0x03040e, bot: 0x0a0c20, glow: 0x3a2f6e, fog: 0x080a18, dens: 0.0066, amb: 0.18, moon: 0.7, stars: 0.9, city: 1.0 },
   { t: 25.0, top: 0x01020a, bot: 0x050714, glow: 0x1b1f45, fog: 0x04050e, dens: 0.0072, amb: 0.13, moon: 0.85, stars: 1.0, city: 0.75 },
   { t: 28.0, top: 0x02040f, bot: 0x0a1026, glow: 0x27356c, fog: 0x070a18, dens: 0.0068, amb: 0.16, moon: 0.6, stars: 0.8, city: 0.5 },

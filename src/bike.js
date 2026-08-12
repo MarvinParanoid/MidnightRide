@@ -118,12 +118,18 @@ export class Bike {
     const torso = add(new THREE.CapsuleGeometry(0.17, 0.34, 4, 10), rider, 0, 1.13, 0.24, -0.62);
     torso.scale.set(1, 1, 0.8);
     this.head = add(new THREE.SphereGeometry(0.135, 12, 10), rider, 0, 1.4, -0.06);
-    add(new THREE.SphereGeometry(0.118, 12, 10), visor, 0, 1.395, -0.11);
+    const visorMesh = add(new THREE.SphereGeometry(0.118, 12, 10), visor, 0, 1.395, -0.11);
+    const arms = [];
     for (const dx of [-0.19, 0.19]) {
-      add(new THREE.CapsuleGeometry(0.055, 0.42, 3, 6), rider, dx, 1.02, 0.02, -1.15); // arms
+      arms.push(add(new THREE.CapsuleGeometry(0.055, 0.42, 3, 6), rider, dx, 1.02, 0.02, -1.15));
       add(new THREE.CapsuleGeometry(0.085, 0.3, 3, 6), rider, dx * 0.9, 0.74, 0.38, 0.7); // thighs
       add(new THREE.CapsuleGeometry(0.06, 0.26, 3, 6), rider, dx * 0.95, 0.5, 0.5, -0.2); // shins
     }
+
+    /* In first person the camera sits where the rider's head is, so the head
+       and the visor wrap around the lens — you end up looking at the inside of
+       a blue sphere. Legs and the bike itself stay: they are what you'd see. */
+    this.hiddenInFirstPerson = [torso, this.head, visorMesh, ...arms];
 
     /* ── lights ─────────────────────────────────────────── */
     this.headMat = new THREE.MeshBasicMaterial({ color: neon(0xfff0d8, 4), toneMapped: false });
@@ -187,10 +193,20 @@ export class Bike {
     this.spray.frustumCulled = false;
     this.lean.add(this.spray);
 
+    this.firstPerson = false;
     this.leanAngle = 0;
     this.steerAngle = 0;
     this.wheelSpin = 0;
     this.bob = 0;
+  }
+
+  /** Hide the parts of the rider that the camera would otherwise be inside. */
+  setFirstPerson(on) {
+    if (this.firstPerson === on) return;
+    this.firstPerson = on;
+    for (const m of this.hiddenInFirstPerson) m.visible = !on;
+    // and the beam volumes, whose apex is right under the lens
+    for (const b of this.beams) b.visible = !on;
   }
 
   update(dt, st) {

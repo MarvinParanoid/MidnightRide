@@ -162,7 +162,7 @@ function streetLamp(ctx, s, side) {
 
   // pool of light on the wet tarmac, stretched down the road
   const p = ctx.at(s, lat - side * 3.0, 0.02);
-  ctx.pool(LAMP_WARM, 0.5).decal(p, ctx.right(s), ctx.forward(s), 15, 32, 0.02);
+  ctx.pool(LAMP_WARM, 0.42).decal(p, ctx.right(s), ctx.forward(s), 14, 24, 0.02);
 }
 
 function guardrail(ctx, side) {
@@ -253,8 +253,8 @@ function city(ctx) {
         ctx.halo(new THREE.Vector3(c.x, c.y + h - 0.6, c.z), 0xff2a2a, 3.2, 0.5);
       }
 
-      // street-level neon
-      if (rnd() < 0.55) {
+      // street-level neon, and its reflection on the wet road below
+      if (rnd() < 0.5) {
         const hex = NEON_PALETTE[(rnd() * NEON_PALETTE.length) | 0];
         const ny = 3 + rnd() * (Math.min(h, 26) - 3);
         const np = ctx.at(s + (rnd() - 0.5) * 6, lat - side * (depth / 2 + 0.35), 0);
@@ -263,9 +263,14 @@ function city(ctx) {
         const sh = vertical ? 3 + rnd() * 5 : 0.7;
         ctx.emit(hex, 3.2).box(np.x, np.y + ny, np.z, sw, sh, 0.3, yaw);
         ctx.halo(new THREE.Vector3(np.x, np.y + ny, np.z), hex, Math.max(sw, sh) * 2.4, 0.42);
-        // its reflection, smeared across the wet road
-        const rp = ctx.at(s, side * (ROAD_HALF - 1.5 - rnd() * 3), 0.02);
-        ctx.pool(hex, 0.42).decal(rp, ctx.right(s), ctx.forward(s), 9, 30, 0.02);
+        /* Only some of them reach the road. Every sign casting a pool meant
+           half a dozen overlapping on the same stretch, and additive blending
+           piled them into a saturated slab with a hard rim — which reads as a
+           painted rectangle, not as a reflection. */
+        if (rnd() < 0.45) {
+          const rp = ctx.at(s, side * (ROAD_HALF - 1.5 - rnd() * 3), 0.02);
+          ctx.pool(hex, 0.26).decal(rp, ctx.right(s), ctx.forward(s), 8, 22, 0.02);
+        }
       }
       d += w + 2 + rnd() * 10;
     }
