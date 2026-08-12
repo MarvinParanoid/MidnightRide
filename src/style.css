@@ -213,3 +213,44 @@ body.nohints .auto { display: none; }   /* a recording shouldn't advertise the a
   .br { bottom: 20px; right: 18px; font-size: 10px; line-height: 1.7; }
   .vig { box-shadow: inset 0 0 140px 20px rgba(0, 0, 0, 0.7); }
 }
+
+/* ── stream mode ──────────────────────────────────────────────
+   A station ident rather than an interface: nothing to read quickly,
+   nothing that moves except the numbers, and generous margins so it
+   survives whatever a streaming service crops. */
+#ui.off { display: none; }
+
+#stream {
+  position: fixed; inset: 0; z-index: 5;
+  pointer-events: none; user-select: none;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.95);
+}
+#stream > div { position: fixed; }
+.s-tl { top: 5vh; left: 5vw; }
+.s-bl { bottom: 5vh; left: 5vw; }
+.s-br { bottom: 5vh; right: 5vw; text-align: right; }
+
+.s-station {
+  font-size: 13px; letter-spacing: 0.5em; color: var(--cyan);
+  text-shadow: 0 0 28px rgba(87, 232, 255, 0.5);
+}
+.s-clock {
+  font-size: 52px; font-weight: 200; line-height: 1.15; letter-spacing: 0.06em;
+  color: var(--ink);
+}
+.s-where { font-size: 12px; letter-spacing: 0.3em; color: var(--dim); }
+
+.s-speed { display: flex; align-items: flex-end; gap: 10px; }
+.s-speed b {
+  font-size: 64px; font-weight: 200; line-height: 0.85;
+  text-shadow: 0 0 34px rgba(255, 77, 141, 0.3);
+}
+.s-speed span { font-size: 12px; letter-spacing: 0.3em; color: var(--dim); padding-bottom: 6px; }
+.s-odo { margin-top: 10px; font-size: 12px; letter-spacing: 0.22em; color: var(--dim); }
+
+.s-now { font-size: 12px; letter-spacing: 0.22em; color: rgba(200, 216, 244, 0.7); }
+.s-plug {
+  margin-top: 8px; font-size: 11px; letter-spacing: 0.24em;
+  color: rgba(150, 168, 200, 0.42);
+}

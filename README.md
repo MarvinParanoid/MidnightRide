@@ -173,6 +173,29 @@ The depth of field is real — a bokeh pass inserted ahead of the bloom, so out-
 focus lights bloom the way they should. The saved image is the raw render: no
 interface, no overlay, whatever you framed.
 
+## Stream mode
+
+```
+index.html?stream=1
+```
+
+The same ride, directed as a channel. Autopilot only — it never hands the
+controls back — the camera changes itself every thirty to ninety seconds, and
+the interface becomes a station ident: clock, place and weather, speed, lifetime
+distance, and where to go if you want to drive it yourself.
+
+Two things are deliberately different from playing. It cruises at eighty to a
+hundred and twenty rather than a hundred and ninety, with an occasional faster
+stretch, because two hours of top speed on a second monitor is exhausting rather
+than hypnotic. And the clock shows the hour the *sky* is set to rather than the
+wall clock — daylight is folded into the small hours anyway, and printing
+`04:43 PM` over an obviously midnight road is the one thing a viewer would
+notice.
+
+Nothing in the soundtrack comes from anywhere else: the engine, the weather and
+the music are all oscillators and generated noise, so there is no third-party
+audio in a broadcast of it.
+
 ## Recording
 
 ```bash

@@ -13,6 +13,7 @@ import { Input, isTouchDevice } from './input.js';
 import { Autopilot } from './autopilot.js';
 import { detectQuality, QualityGuard, TIERS } from './quality.js';
 import { PhotoMode } from './photo.js';
+import { StreamMode, StreamPacer } from './stream.js';
 import { Hud, formatClock } from './hud.js';
 import { palette, nightHourFromLocal, placeName, weatherForToday } from './timeofday.js';
 import { AudioCore } from './audio/core.js';
@@ -89,6 +90,15 @@ hud.setIntro(`${place} · ${weather.temp}°C · ${weather.name}`);
 
 const photo = new PhotoMode({ camera, renderer, scene, composer, canvas });
 
+/* ?stream=1 turns the game into a channel: autopilot only, gentler pace,
+   the interface replaced by a station ident. */
+const stream = new StreamMode();
+const pacer = new StreamPacer();
+if (stream.active) {
+  hud.root.classList.add('off');
+  state.auto = true;      // it really is on; keep the flag honest for telemetry
+}
+
 /* The only thing this game remembers about you: how far you have ridden.
    No levels, no unlocks — just a note that you have been here before. */
 const ODO_KEY = 'midnightride.km';
@@ -156,6 +166,15 @@ function setAuto(on) {
  * turns the game into something you can just leave running.
  */
 function controls(dt, now) {
+  if (stream.active) {
+    pacer.update(dt);
+    state.autoCamT -= dt;
+    if (state.autoCamT <= 0) {
+      state.autoCamT = 30 + Math.random() * 60;     // 30–90s, as unhurried as the ride
+      state.camMode = (state.camMode + 1) % CAM_MODES.length;
+    }
+    return auto.update(dt, state, road, traffic, { rain: state.rain, pace: pacer.scale });
+  }
   if (input.active) {
     state.lastInput = now;
     if (state.auto) setAuto(false);
@@ -244,7 +263,7 @@ async function begin() {
   state.odo = 0;                 // the attract lap isn't yours; don't bank it
   state.camMode = 0;             // hand back the riding camera
   state.autoCamT = 45;
-  if (!isTouchDevice) setAuto(false);   // desktop starts in your hands
+  if (!isTouchDevice && !stream.active) setAuto(false);   // desktop starts in your hands
   audio = new AudioCore();
   engine = new EngineSound(audio);
   music = new Music(audio);
@@ -612,6 +631,16 @@ function frame() {
     clockTick = 1;
     clockStr = formatClock(new Date(Date.now() + state.timeOffset * 3600e3));
   }
+  stream.update({
+    kmh: state.v * 3.6,
+    clock12: StreamMode.clock12(nightHourFromLocal(new Date(Date.now() + state.timeOffset * 3600e3))),
+    place, temp: weather.temp,
+    weather: state.rainOverride === null ? weather.name : state.rainOverride > 0 ? 'Rain' : 'Clear',
+    biome,
+    totalKm: lifetimeKm + state.odo / 1000,
+    bpm: music ? music.bpm : 84,
+  });
+
   hud.update(dt, {
     kmh: state.v * 3.6,
     rpm: engine ? engine.rpm : 1150,

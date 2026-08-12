@@ -79,6 +79,7 @@ export class Autopilot {
     let target = CRUISE[biome] ?? 45;
     target *= 1 + road.remotenessAt(s) * 0.14;      // nobody about, press on
     target *= 1 - (opts.rain || 0) * 0.13;
+    target *= opts.pace ?? 1;                       // stream mode rides slower
     target = Math.min(target, this.cornerLimit(road, s, v));
     // a slow wander so it never sits at exactly one number
     target *= 0.95 + 0.05 * Math.sin(this.t * 0.07) + 0.03 * Math.sin(this.t * 0.021);
