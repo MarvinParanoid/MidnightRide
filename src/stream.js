@@ -66,7 +66,7 @@ export class StreamMode {
       `${s.place} · ${s.temp}°C · ${s.weather} · ${s.biome}`.toUpperCase();
     this.q('[data-s-odo]').textContent =
       `${Math.round(s.totalKm).toLocaleString('en-US')} km travelled`;
-    this.q('[data-s-now]').textContent = `♫ 88.3 NIGHT FM · generated live · ${Math.round(s.bpm)} BPM`;
+    this.q('[data-s-now]').textContent = `♫ ${s.station} · ${s.style} · ${Math.round(s.bpm)} BPM`;
   }
 }
 

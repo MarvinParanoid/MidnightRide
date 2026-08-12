@@ -594,6 +594,7 @@ function frame() {
       musicEnergy: music.enabled ? music.energy : 0,
     });
     audio.setEnclosure(state.enclosure);
+    music.setContext({ biome, remote: state.remote, rain: rainAmount });
     music.tick(clamp(kmh / 230, 0, 1), dt);
   }
 
@@ -651,6 +652,8 @@ function frame() {
     biome,
     totalKm: lifetimeKm + state.odo / 1000,
     bpm: music ? music.bpm : 84,
+    station: music ? music.stationName : '88.3 NIGHT FM',
+    style: music ? music.stationStyle : 'generated live',
   });
 
   hud.update(dt, {

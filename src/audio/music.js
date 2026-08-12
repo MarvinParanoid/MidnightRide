@@ -1,13 +1,7 @@
 import { mtof } from './core.js';
 import { clamp, smoothstep } from '../geo.js';
+import { STATIONS, chordNotes, stationFor, pickSection } from './stations.js';
 
-/* i – VI – III – VII in A minor: the synthwave home key. */
-const PROGRESSION = [
-  { root: 45, notes: [45, 48, 52, 55] },  // Am7
-  { root: 41, notes: [41, 45, 48, 52] },  // Fmaj7
-  { root: 48, notes: [48, 52, 55, 59] },  // Cmaj7
-  { root: 43, notes: [43, 47, 50, 54] },  // G
-];
 const ARP = [0, 2, 1, 3, 2, 0, 3, 1];
 const LEAD = [
   [12, 10, 7, 12],
@@ -16,10 +10,19 @@ const LEAD = [
   [10, 7, 5, 7],
 ];
 
+const KEYS = [45, 43, 47, 40, 50];        // A, G, B, E, D — comfortable roots
+const DWELL = 95;                          // seconds a station holds before it may change
+const TRANSPOSE_EVERY = 420;               // and how long before the key drifts
+
 /**
- * A generative synthwave engine. Layers unlock with speed: ambient pads while
- * you cruise, an arp as you pick up, drums and bass past 110, a lead when you
- * are really going. Tempo drifts up with the speedometer.
+ * A generative radio rather than a loop.
+ *
+ * Layers still unlock with speed — pads while cruising, an arp as you pick up,
+ * drums and bass past a hundred — but on top of that the *station* changes with
+ * where you are, each with its own key colour, tempo, chords and instruments;
+ * the arrangement thins and thickens every eight bars; and the key itself
+ * drifts every few minutes. One four-chord loop in one key is fine for a play
+ * session and unbearable for a five-hour stream.
  */
 export class Music {
   constructor(core) {
@@ -29,8 +32,7 @@ export class Music {
     this.out = core.gain(1.5);
     this.out.connect(core.master);
 
-    // ping-pong-ish delay, mostly for the arp and lead
-    this.delay = ctx.createDelay(1.0);
+    this.delay = ctx.createDelay(1.5);
     this.delay.delayTime.value = 0.34;
     this.fb = core.gain(0.4);
     this.delayFilter = core.filter('lowpass', 2600, 0.7);
@@ -50,49 +52,122 @@ export class Music {
     this.layers.arp.connect(this.delaySend);
     this.layers.lead.connect(this.delaySend);
 
-    this.bpm = 84;
+    this.key = KEYS[0];
+    this.stationId = 'night';
+    this.station = STATIONS.night;
+    this.progression = this.station.progressions[0];
+    this.section = { name: 'full', drums: 1, arp: 1, lead: 1, pad: 1 };
+
+    this.bpm = 88;
     this.step = 0;
     this.nextTime = 0;
     this.beats = [];
     this.onBeat = null;
     this.enabled = true;
     this.energy = 0;
+
+    this.ctxInfo = { biome: 'CITY', remote: 0, rain: 0 };
+    this.sinceStation = 0;
+    this.sinceKey = 0;
+    this.wantStation = null;
+  }
+
+  get stationName() {
+    return `${this.station.id} ${this.station.name}`;
+  }
+
+  get stationStyle() {
+    return this.station.style;
   }
 
   get stepDur() {
     return 60 / this.bpm / 4;
   }
 
-  /** Call every frame. Schedules a little ahead of the audio clock. */
+  /** Where the ride currently is; the radio decides what to do about it. */
+  setContext(ctx) {
+    this.ctxInfo = ctx;
+  }
+
+  /* ── the dial ─────────────────────────────────────────── */
+
+  considerStation(dt) {
+    this.sinceStation += dt;
+    if (this.sinceStation < DWELL || this.wantStation) return;
+    const pick = stationFor(this.ctxInfo);
+    if (pick !== this.stationId) this.wantStation = pick;    // applied on the next bar
+  }
+
+  changeStation(id, at) {
+    this.stationId = id;
+    this.station = STATIONS[id];
+    this.progression = this.station.progressions[
+      (Math.random() * this.station.progressions.length) | 0
+    ];
+    this.sinceStation = 0;
+    this.wantStation = null;
+    this.delay.delayTime.setTargetAtTime((60 / this.bpm) * this.station.delayBeats, at, 0.3);
+    this.static(at);
+  }
+
+  /** A second of tuning noise, the way a radio changes station. */
+  static(at) {
+    const core = this.core;
+    const s = core.ctx.createBufferSource();
+    s.buffer = core.noise;
+    s.loop = true;
+    const bp = core.filter('bandpass', 1400, 1.4);
+    const g = core.gain(0);
+    s.connect(bp);
+    bp.connect(g);
+    g.connect(this.out);
+
+    const dur = 0.55;
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(0.1, at + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    bp.frequency.setValueAtTime(700, at);
+    bp.frequency.exponentialRampToValueAtTime(3200, at + dur * 0.6);
+    bp.frequency.exponentialRampToValueAtTime(900, at + dur);
+    s.start(at);
+    s.stop(at + dur + 0.05);
+
+    // and duck everything else while the dial moves
+    for (const g2 of Object.values(this.layers)) {
+      g2.gain.setTargetAtTime(g2.gain.value * 0.25, at, 0.05);
+    }
+  }
+
+  /* ── scheduling ───────────────────────────────────────── */
+
   tick(speed01, dt) {
     if (!this.core.started) return;
     const ctx = this.core.ctx;
     const now = ctx.currentTime;
 
     this.energy += (speed01 - this.energy) * Math.min(1, dt * 0.7);
-    this.bpm = 82 + this.energy * 20;
+    const st = this.station;
+    this.bpm = st.bpm[0] + this.energy * (st.bpm[1] - st.bpm[0]);
 
-    /* layers arrive earlier and louder than they used to: at speed the engine
-       and the wind fill a lot of room, and the music has to hold its own */
+    this.considerStation(dt);
+    this.sinceKey += dt;
+
     const e = this.energy;
-    /* Layers should change the *density* of the music, not its loudness. While
-       the drums are still missing, what is playing gets a makeup gain, so the
-       track never disappears in the gap between "cruising" and "moving". */
+    const sec = this.section;
     const makeup = 1 + (1 - smoothstep(0.12, 0.34, e)) * 0.7;
+    /* Per-station trim, so changing station is a change of mood and not a
+       change of volume — an eight decibel step between two of them sounded
+       like the music had dropped out. */
+    const on = (this.enabled ? 1 : 0) * (st.level ?? 1);
     const target = {
-      pad: this.enabled ? (0.9 - smoothstep(0.35, 0.7, e) * 0.24) * makeup : 0,
-      arp: this.enabled ? (0.12 + smoothstep(0.06, 0.24, e) * 0.68) * makeup : 0,
-      drums: this.enabled ? smoothstep(0.14, 0.30, e) * 1.1 : 0,
-      bass: this.enabled ? smoothstep(0.10, 0.26, e) * 1.0 : 0,
-      lead: this.enabled ? smoothstep(0.48, 0.68, e) * 0.6 : 0,
+      pad: on * (0.9 - smoothstep(0.35, 0.7, e) * 0.24) * makeup * sec.pad,
+      arp: on * (0.12 + smoothstep(0.06, 0.24, e) * 0.68) * makeup * sec.arp,
+      drums: on * smoothstep(0.14, 0.30, e) * 1.1 * sec.drums * (st.drums === 'none' ? 0 : 1),
+      bass: on * smoothstep(0.10, 0.26, e) * 1.0 * st.bassMul,
+      lead: on * smoothstep(0.48, 0.68, e) * 0.6 * sec.lead * (st.lead ? 1 : 0),
     };
-    for (const k in target) {
-      this.layers[k].gain.setTargetAtTime(target[k], now, 0.6);
-    }
-    this.delay.delayTime.setTargetAtTime((60 / this.bpm) * 0.75, now, 0.8);
+    for (const k in target) this.layers[k].gain.setTargetAtTime(target[k], now, 0.6);
 
-    /* after a hitch, skip forward in whole steps so the grid never shifts;
-       after a long stall (backgrounded tab) just restart cleanly on a bar */
     if (this.nextTime === 0 || now - this.nextTime > 2) {
       this.nextTime = now + 0.06;
       this.step = Math.ceil(this.step / 16) * 16;
@@ -108,7 +183,6 @@ export class Music {
       this.step++;
     }
 
-    // fire visual beats when the audio clock actually reaches them
     while (this.beats.length && this.beats[0] <= now) {
       this.beats.shift();
       if (this.onBeat) this.onBeat();
@@ -118,66 +192,80 @@ export class Music {
   schedule(step, t) {
     const bar = Math.floor(step / 16);
     const s = step % 16;
-    const chord = PROGRESSION[Math.floor(bar / 2) % PROGRESSION.length];
+    const st = this.station;
+
+    /* everything structural happens on a bar line, never mid-phrase */
+    if (s === 0) {
+      if (this.wantStation) this.changeStation(this.wantStation, t);
+      if (bar % 8 === 0) {
+        this.section = pickSection();
+        if (Math.random() < 0.4) {
+          this.progression = st.progressions[(Math.random() * st.progressions.length) | 0];
+        }
+      }
+      if (this.sinceKey > TRANSPOSE_EVERY && bar % 8 === 0) {
+        this.sinceKey = 0;
+        this.key = KEYS[(Math.random() * KEYS.length) | 0];
+      }
+    }
+
+    const [deg, type] = this.progression[Math.floor(bar / 2) % this.progression.length];
+    const root = this.key + deg;
+    const notes = chordNotes(root, type);
     const e = this.energy;
 
     if (s % 4 === 0) this.beats.push(t);
 
-    /* pad — one long swell per chord */
-    if (s === 0 && bar % 2 === 0) this.pad(chord, t, (60 / this.bpm) * 8);
+    if (s === 0 && bar % 2 === 0) this.pad(notes, t, (60 / this.bpm) * 8);
 
-    /* arp */
-    const arpRate = e > 0.5 ? 1 : 2;               // 16ths when moving, 8ths when cruising
-    if (s % arpRate === 0) {
-      const n = chord.notes[ARP[(step / arpRate) % ARP.length] % chord.notes.length] + 24;
+    const rate = e > 0.5 ? st.arpRate / 2 : st.arpRate;
+    if (this.section.arp && s % Math.max(1, rate) === 0) {
+      const n = notes[ARP[(step / Math.max(1, rate)) % ARP.length] % notes.length] + st.arpOct;
       this.pluck(n, t, 0.26 + Math.random() * 0.06);
     }
 
-    /* drums */
-    if (s === 0 || s === 8 || (e > 0.55 && (s === 4 || s === 12))) this.kick(t);
-    if (s === 4 || s === 12) this.snare(t);
-    if (s % 2 === 0) this.hat(t, s % 4 === 0 ? 0.5 : 0.32);
-    if (e > 0.6 && s === 14) this.hat(t, 0.6, true);
-
-    /* bass */
-    if (s === 0 || s === 6 || s === 8 || s === 14) {
-      this.bass(chord.root, t, s === 0 ? 0.5 : 0.28);
+    if (st.drums !== 'none' && this.section.drums) {
+      const four = st.drums === 'four';
+      if (s === 0 || s === 8 || (e > 0.55 && (s === 4 || s === 12))) this.kick(t);
+      if (four ? (s === 4 || s === 12) : (s === 4 || s === 12 || s === 14)) this.snare(t);
+      if (st.hats && s % 2 === 0) this.hat(t, s % 4 === 0 ? 0.5 : 0.32);
+      if (st.hats && e > 0.6 && s === 14) this.hat(t, 0.6, true);
     }
 
-    /* lead motif, once per bar, only at speed */
-    if (s === 0 && e > 0.55) {
+    if (s === 0 || s === 6 || s === 8 || s === 14) {
+      this.bass(root - 12, t, s === 0 ? 0.5 : 0.28);
+    }
+
+    if (s === 0 && e > 0.55 && st.lead && this.section.lead) {
       const motif = LEAD[Math.floor(bar / 2) % LEAD.length];
-      motif.forEach((iv, i) => {
-        this.lead(chord.root + 24 + iv, t + i * this.stepDur * 3, 0.42);
-      });
+      motif.forEach((iv, i) => this.lead(root + 24 + iv, t + i * this.stepDur * 3, 0.42));
     }
   }
 
   /* ── voices ───────────────────────────────────────────── */
 
-  pad(chord, t, dur) {
+  pad(notes, t, dur) {
     const core = this.core;
     const ctx = core.ctx;
+    const st = this.station;
     const g = core.gain(0);
-    const lp = core.filter('lowpass', 420, 1.4);
+    const lp = core.filter('lowpass', st.padCut[0], 1.4);
     g.connect(lp);
     lp.connect(this.layers.pad);
 
-    lp.frequency.setValueAtTime(360, t);
-    lp.frequency.linearRampToValueAtTime(900 + this.energy * 1400, t + dur * 0.45);
-    lp.frequency.linearRampToValueAtTime(420, t + dur);
+    lp.frequency.setValueAtTime(st.padCut[0], t);
+    lp.frequency.linearRampToValueAtTime(st.padCut[0] + (st.padCut[1] - st.padCut[0]) * (0.4 + this.energy * 0.6), t + dur * 0.45);
+    lp.frequency.linearRampToValueAtTime(st.padCut[0], t + dur);
 
-    /* twelve detuned saws through a slow filter sweep: quiet per voice, but
-       they cancel each other enough that the bus level has to be generous */
     g.gain.setValueAtTime(0.0001, t);
     g.gain.linearRampToValueAtTime(0.5, t + dur * 0.32);
     g.gain.linearRampToValueAtTime(0.0001, t + dur);
 
-    for (const n of chord.notes) {
+    for (const n of notes) {
       for (const [oct, det] of [[0, -7], [0, 6], [12, 3]]) {
         const o = ctx.createOscillator();
         o.type = 'sawtooth';
-        o.frequency.value = mtof(n + oct + 12);
+        o.frequency.value = mtof(n + oct + st.padOct);
         o.detune.value = det;
         const vg = core.gain(0.2);
         o.connect(vg);
