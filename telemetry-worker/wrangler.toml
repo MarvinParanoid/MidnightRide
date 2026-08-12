@@ -1,0 +1,13 @@
+name = "midnight-ride-telemetry"
+main = "src/worker.js"
+compatibility_date = "2025-11-01"
+
+# Created with:  npx wrangler d1 create midnight-ride
+# then paste the id it prints into database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "midnight-ride"
+database_id = "9ebb4c78-a959-42d5-8283-adbebe0156c4"
+
+# The report key is a secret, not a var:
+#   npx wrangler secret put REPORT_KEY
