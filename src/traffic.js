@@ -178,6 +178,7 @@ export class Traffic {
       case BIOME.GAS: n = 3; break;
       case BIOME.FOREST: n = 2; break;
       case BIOME.BRIDGE: n = 3; break;
+      case BIOME.COAST: n = 3; break;
       default: n = 4;
     }
     // deep in a long haul a single pair of tail lights becomes an event

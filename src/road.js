@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MeshBuilder, mulberry32, smoothstep } from './geo.js';
 import { assets } from './assets.js';
 import { decorateChunk, ChunkCtx } from './props.js';
-import { DS, N, CHUNK_LEN, ROAD_HALF, SHOULDER, AHEAD, BEHIND, BIOME } from './constants.js';
+import { DS, N, CHUNK_LEN, ROAD_HALF, SHOULDER, AHEAD, BEHIND, BIOME, coastSide } from './constants.js';
 
 export * from './constants.js';
 
@@ -58,7 +58,8 @@ class BiomeSequencer {
       const r = this.rnd();
       const [biome, len] =
         r < 0.52 ? [BIOME.HIGHWAY, 10 + ((this.rnd() * 16) | 0)]
-          : r < 0.84 ? [BIOME.FOREST, 8 + ((this.rnd() * 14) | 0)]
+          : r < 0.72 ? [BIOME.FOREST, 8 + ((this.rnd() * 14) | 0)]
+          : r < 0.84 ? [BIOME.COAST, 7 + ((this.rnd() * 9) | 0)]
             : r < 0.93 ? [BIOME.BRIDGE, 2 + ((this.rnd() * 2) | 0)]
               : [BIOME.TUNNEL, 2 + ((this.rnd() * 2) | 0)];
       for (let i = 0; i < len && plan.length < total; i++) plan.push(biome);
@@ -94,23 +95,34 @@ class BiomeSequencer {
           ? [BIOME.HIGHWAY, 5 + ((this.rnd() * 6) | 0)]
           : [BIOME.CITY, 5 + ((this.rnd() * 6) | 0)];
       case BIOME.HIGHWAY:
-        return r < 0.18
+        return r < 0.15
           ? [BIOME.GAS, 1]
-          : r < 0.46
+          : r < 0.38
             ? [BIOME.FOREST, 5 + ((this.rnd() * 7) | 0)]
-            : r < 0.66
-              ? [BIOME.BRIDGE, 2 + ((this.rnd() * 2) | 0)]
-              : r < 0.86
-                ? [BIOME.CITY, 5 + ((this.rnd() * 6) | 0)]
-                : [BIOME.TUNNEL, 2 + ((this.rnd() * 3) | 0)];
+            : r < 0.54
+              ? [BIOME.COAST, 6 + ((this.rnd() * 7) | 0)]
+              : r < 0.68
+                ? [BIOME.BRIDGE, 2 + ((this.rnd() * 2) | 0)]
+                : r < 0.86
+                  ? [BIOME.CITY, 5 + ((this.rnd() * 6) | 0)]
+                  : [BIOME.TUNNEL, 2 + ((this.rnd() * 3) | 0)];
       case BIOME.GAS:
         return [BIOME.HIGHWAY, 5 + ((this.rnd() * 8) | 0)];
       case BIOME.FOREST:
-        return r < 0.3
+        return r < 0.24
           ? [BIOME.BRIDGE, 2]
-          : r < 0.6
+          : r < 0.44
             ? [BIOME.TUNNEL, 2 + ((this.rnd() * 2) | 0)]
-            : [BIOME.HIGHWAY, 5 + ((this.rnd() * 6) | 0)];
+            : r < 0.6
+              ? [BIOME.COAST, 6 + ((this.rnd() * 6) | 0)]
+              : [BIOME.HIGHWAY, 5 + ((this.rnd() * 6) | 0)];
+
+      case BIOME.COAST:
+        return r < 0.5
+          ? [BIOME.HIGHWAY, 6 + ((this.rnd() * 7) | 0)]
+          : r < 0.8
+            ? [BIOME.FOREST, 5 + ((this.rnd() * 6) | 0)]
+            : [BIOME.CITY, 5 + ((this.rnd() * 5) | 0)];
       case BIOME.BRIDGE:
       default:
         return r < 0.5
@@ -300,6 +312,8 @@ export class Road {
     const secGroundR = [];
     const tunnel = biome === BIOME.TUNNEL;
     const bridge = biome === BIOME.BRIDGE;
+    // on the coast the ground stops at the parapet: past it there is only sea
+    const sea = biome === BIOME.COAST ? coastSide(ci) : 0;
 
     for (let i = 0; i <= N; i++) {
       const s = sStart + i * DS;
@@ -312,16 +326,16 @@ export class Road {
       secShoulderL.push({ l: at(-ROAD_HALF - SHOULDER, -0.05), r: at(-ROAD_HALF) });
       secShoulderR.push({ l: at(ROAD_HALF), r: at(ROAD_HALF + SHOULDER, -0.05) });
       if (!tunnel && !bridge) {
-        secGroundL.push({ l: at(-90, -0.9 - (i % 3) * 0.35), r: at(-ROAD_HALF - SHOULDER, -0.05) });
-        secGroundR.push({ l: at(ROAD_HALF + SHOULDER, -0.05), r: at(90, -0.9 - ((i + 1) % 3) * 0.35) });
+        if (sea >= 0) secGroundL.push({ l: at(-90, -0.9 - (i % 3) * 0.35), r: at(-ROAD_HALF - SHOULDER, -0.05) });
+        if (sea <= 0) secGroundR.push({ l: at(ROAD_HALF + SHOULDER, -0.05), r: at(90, -0.9 - ((i + 1) % 3) * 0.35) });
       }
     }
 
     ctx.get('asphalt', a.asphalt).ribbon(secAsphalt, 0.06);
     ctx.get('shoulder', a.shoulder).ribbon(secShoulderL, 0.1).ribbon(secShoulderR, 0.1);
-    if (secGroundL.length) {
-      ctx.get('ground', a.ground).ribbon(secGroundL, 0.02).ribbon(secGroundR, 0.02);
-    }
+    const ground = ctx.get('ground', a.ground);
+    if (secGroundL.length) ground.ribbon(secGroundL, 0.02);
+    if (secGroundR.length) ground.ribbon(secGroundR, 0.02);
 
     /* ── paint ───────────────────────────────────────────── */
     const white = ctx.get('paintWhite', a.paintWhite);

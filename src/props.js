@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { MeshBuilder } from './geo.js';
 import { assets, neon, NEON_PALETTE } from './assets.js';
-import { BIOME, ROAD_HALF, SHOULDER, DS, N, CHUNK_LEN } from './constants.js';
+import { BIOME, ROAD_HALF, SHOULDER, DS, N, CHUNK_LEN, coastSide } from './constants.js';
 
 /* An object yawed to follow the road at heading h uses rotation.y = -h:
    its local +X is then the road's right vector and -Z is forward. */
@@ -589,6 +589,61 @@ function bridge(ctx) {
   }
 }
 
+/**
+ * The sea on one side, a metre or two below the road. Water is nearly a mirror
+ * and the environment map is the sky, so it picks up the moon and the horizon
+ * glow for free; the rest is a parapet, a smeared moon path, and — rarely —
+ * a lighthouse a long way out.
+ */
+function coast(ctx) {
+  const a = ctx.a;
+  const rnd = ctx.rnd;
+  /* The road builder uses the same rule to decide where to stop the ground. */
+  const side = coastSide((ctx.s0 / CHUNK_LEN) | 0);
+  const drop = -5.5;
+
+  guardrail(ctx, -side);
+
+  /* parapet along the seaward edge */
+  const c = ctx.get('concrete', a.concrete);
+  const wall = [];
+  const verge = [];
+  for (let i = 0; i <= N; i++) {
+    const s = ctx.s0 + i * DS;
+    const lat = side * (ROAD_HALF + SHOULDER + 0.3);
+    wall.push({ l: ctx.at(s, lat, 0.95), r: ctx.at(s, lat, -0.3) });
+    verge.push({ l: ctx.at(s, lat, 0.95), r: ctx.at(s, lat + side * 0.5, 0.95) });
+  }
+  c.ribbon(wall, 0.1).ribbon(verge, 0.1);
+
+  /* the sea itself, and the rocks it breaks on */
+  const w = ctx.at(ctx.s0 + CHUNK_LEN / 2, side * 210, drop);
+  ctx.get('water', a.water).box(w.x, w.y, w.z, 400, 0.4, CHUNK_LEN + 60, ctx.yaw(ctx.s0 + CHUNK_LEN / 2));
+  const dark = ctx.get('dark', a.dark);
+  for (let i = 0; i < 14; i++) {
+    const s = ctx.s0 + rnd() * CHUNK_LEN;
+    const p = ctx.at(s, side * (12 + rnd() * 26), drop + rnd() * 1.6);
+    dark.box(p.x, p.y, p.z, 2 + rnd() * 5, 1.5 + rnd() * 2.5, 2 + rnd() * 5, rnd() * 3);
+  }
+
+  /* moonlight lying on the water */
+  const mp = ctx.at(ctx.s0 + CHUNK_LEN / 2, side * 90, drop + 0.25);
+  ctx.pool(0x9fb6ff, 0.5).decal(mp, ctx.right(ctx.s0), ctx.forward(ctx.s0), 150, CHUNK_LEN + 40, 0);
+
+  if (rnd() < 0.55) streetLamp(ctx, ctx.s0 + ((rnd() * N) | 0) * DS, -side);
+
+  /* something out at sea, blinking */
+  if (rnd() < 0.16) {
+    const p = ctx.at(ctx.s0 + rnd() * CHUNK_LEN, side * (260 + rnd() * 320), drop + 14);
+    ctx.get('concrete', a.concrete).cylinder(p.x, p.y - 14, p.z, 1.6, 16, 6);
+    ctx.halo(p, 0xffd08a, 7, 0.7);
+  }
+  if (rnd() < 0.3) {
+    const p = ctx.at(ctx.s0 + rnd() * CHUNK_LEN, side * (70 + rnd() * 120), drop + 1.2);
+    ctx.halo(p, rnd() < 0.5 ? 0x2bff9a : 0xff3a2a, 2.2, 0.6);   // a buoy
+  }
+}
+
 export function decorateChunk(ctx) {
   switch (ctx.biome) {
     case BIOME.CITY: city(ctx); break;
@@ -596,6 +651,7 @@ export function decorateChunk(ctx) {
     case BIOME.FOREST: forest(ctx); break;
     case BIOME.GAS: gasStation(ctx); break;
     case BIOME.BRIDGE: bridge(ctx); break;
+    case BIOME.COAST: coast(ctx); break;
     default: highway(ctx); break;
   }
 }

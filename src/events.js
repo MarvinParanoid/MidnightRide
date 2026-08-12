@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { assets, neon } from './assets.js';
 import { clamp, damp, smoothstep, mulberry32, MeshBuilder } from './geo.js';
-import { BIOME, VIEW_DIST } from './constants.js';
+import { BIOME, VIEW_DIST, ROAD_HALF, SHOULDER } from './constants.js';
 
 /**
  * The things that happen maybe once in half an hour.
@@ -95,8 +95,11 @@ export class Events {
     this.rider = { obj: null, lean: null, active: false, s: 0, lat: 0, speed: 42, next: 180 + r() * 360, life: 0, phase: 0 };
     this.storm = { active: false, until: 0, strikeAt: 0, next: 150 + r() * 300, reflash: -1 };
     this.overlook = { obj: null };
+    this.works = { obj: null, active: false, s: 0, side: 1, len: 0,
+                   next: 200 + r() * 380, chase: 0 };
+    this.broken = { obj: null, active: false, s: 0, next: 150 + r() * 320 };
     /* how many of the rare things this session actually showed anyone */
-    this.seen = { train: 0, rider: 0, plane: 0, planeLow: 0, lightning: 0 };
+    this.seen = { train: 0, rider: 0, plane: 0, planeLow: 0, lightning: 0, works: 0, broken: 0 };
   }
 
   /* ── lazy construction: nothing exists until it first happens ── */
@@ -205,6 +208,7 @@ export class Events {
     const headGlow = a.glowSprite(0xffeccf, 1.6, 0.6);
     headGlow.position.set(0, 0.86, -0.86);
     lean.add(headGlow);
+    this.rider.headGlow = headGlow;
 
     const cone = new THREE.Mesh(
       new THREE.ConeGeometry(3.0, 26, 12, 1, true),
@@ -223,6 +227,207 @@ export class Events {
     this.scene.add(root);
     this.rider.obj = root;
     this.rider.lean = lean;
+  }
+
+  /**
+   * Roadworks: a coned-off lane, an arrow board with lights chasing toward the
+   * side that is still open, and a couple of beacons. Everything is built once
+   * into a single group placed at the start of the works, so the cones follow
+   * the road without thirty separate objects being repositioned every frame.
+   */
+  buildWorks() {
+    const a = this.a;
+    const g = new THREE.Group();
+    const cone = new THREE.ConeGeometry(0.22, 0.62, 7);
+    const orange = new THREE.MeshStandardMaterial({
+      color: 0xd8500e, roughness: 0.75, metalness: 0.1, emissive: 0x3a1200, emissiveIntensity: 1,
+    });
+    const band = new THREE.MeshBasicMaterial({ color: neon(0xffffff, 1.4), toneMapped: false });
+    const bandGeo = new THREE.CylinderGeometry(0.15, 0.19, 0.1, 7);
+
+    this.works.cones = [];
+    for (let i = 0; i < 26; i++) {
+      const c = new THREE.Group();
+      c.add(new THREE.Mesh(cone, orange));
+      const b = new THREE.Mesh(bandGeo, band);
+      b.position.y = 0.16;
+      c.add(b);
+      g.add(c);
+      this.works.cones.push(c);
+    }
+
+    /* the arrow board */
+    const board = new THREE.Group();
+    board.add(new THREE.Mesh(
+      new THREE.BoxGeometry(2.4, 1.3, 0.16),
+      new THREE.MeshStandardMaterial({ color: 0x0b0d12, roughness: 0.8, metalness: 0.2 })
+    ));
+    this.works.lamps = [];
+    for (let i = 0; i < 5; i++) {
+      const l = new THREE.Mesh(
+        new THREE.BoxGeometry(0.22, 0.22, 0.08),
+        new THREE.MeshBasicMaterial({ color: neon(0xffa81e, 3), toneMapped: false })
+      );
+      l.position.set(-0.8 + i * 0.4, 0, 0.12);
+      board.add(l);
+      const glow = a.glowSprite(0xffa81e, 1.5, 0);
+      glow.position.copy(l.position);
+      board.add(glow);
+      this.works.lamps.push({ mesh: l, glow });
+    }
+    board.position.y = 1.5;
+    g.add(board);
+    this.works.board = board;
+
+    this.works.beacons = [];
+    for (let i = 0; i < 2; i++) {
+      const bc = a.glowSprite(0xffb02a, 2.2, 0);
+      g.add(bc);
+      this.works.beacons.push(bc);
+    }
+
+    g.visible = false;
+    this.scene.add(g);
+    this.works.obj = g;
+  }
+
+  updateWorks(dt, st) {
+    const w = this.works;
+    if (!w.active) {
+      w.next -= dt;
+      const ok = st.biome === 'HIGHWAY' || st.biome === 'CITY';
+      if (w.next > 0 || !ok || st.v < 8) return;
+      if (!w.obj) this.buildWorks();
+      w.active = true;
+      w.side = 1;                       // always the outer lane on your side
+      w.s = st.s + 260 + this.rnd() * 180;
+      w.len = 120 + this.rnd() * 90;
+
+      const origin = this.road.point(w.s, 0, 0, new THREE.Vector3());
+      w.obj.position.copy(origin);
+      const place = (obj, s, lat, y) => {
+        this.road.point(s, lat, y, this.tmp);
+        obj.position.copy(this.tmp).sub(origin);
+        obj.rotation.y = -this.road.poseAt(s).h;
+      };
+      /* cones taper in over the first thirty metres, then hold the lane shut */
+      w.cones.forEach((c, i) => {
+        const f = i / (w.cones.length - 1);
+        const along = w.s + f * w.len;
+        const taper = Math.min(1, f * 4.5);
+        place(c, along, w.side * (7.4 - taper * 3.4), 0.31);
+      });
+      place(w.board, w.s - 26, w.side * 6.6, 1.5);
+      place(w.beacons[0], w.s - 26, w.side * 6.6, 2.6);
+      place(w.beacons[1], w.s + w.len, w.side * 6.2, 1.4);
+      w.obj.visible = true;
+      this.seen.works++;
+      return;
+    }
+
+    /* the lights chase toward the lane that is still open */
+    w.chase += dt * 6;
+    const idx = Math.floor(w.chase) % 7;
+    w.lamps.forEach((l, i) => {
+      const on = idx >= 4 ? true : i === (w.side > 0 ? 4 - idx : idx);
+      l.mesh.visible = on;
+      l.glow.material.opacity = on ? 0.9 : 0;
+    });
+    const flash = Math.sin(st.now * 7) > 0;
+    w.beacons.forEach((b, i) => { b.material.opacity = (i === 0 ? flash : !flash) ? 0.8 : 0.05; });
+
+    if (st.s > w.s + w.len + 140) {
+      w.active = false;
+      w.obj.visible = false;
+      w.next = 260 + this.rnd() * 420;
+    }
+  }
+
+  /** Which lane the autopilot must not use, if any. */
+  get closedLane() {
+    const w = this.works;
+    return w.active ? { from: w.s - 90, to: w.s + w.len + 20, lat: w.side * 5.0 } : null;
+  }
+
+  /**
+   * Somebody stopped on the hard shoulder with the hazards going. Nothing
+   * happens and nothing is required of you — it is just a thing that is there,
+   * the way it would be on a real road at two in the morning.
+   */
+  buildBroken() {
+    const a = this.a;
+    const g = new THREE.Group();
+    const paint = new THREE.MeshStandardMaterial({
+      color: 0x141820, roughness: 0.3, metalness: 0.8, envMapIntensity: 1.1,
+    });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.86, 0.62, 4.4), paint);
+    body.position.y = 0.63;
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.66, 0.56, 2.2), paint);
+    cabin.position.set(0, 1.19, 0.2);
+    g.add(body, cabin);
+
+    /* boot open — the universal sign that this is not going anywhere */
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 1.2), paint);
+    lid.position.set(0, 1.5, 1.9);
+    lid.rotation.x = -0.9;
+    g.add(lid);
+
+    this.broken.lamps = [];
+    for (const dx of [-0.72, 0.72]) {
+      for (const [dz, hex] of [[-2.2, 0xffa81e], [2.2, 0xff7a1e]]) {
+        const m = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.12, 0.06),
+          new THREE.MeshBasicMaterial({ color: neon(hex, 2.6), toneMapped: false })
+        );
+        m.position.set(dx, 0.75, dz);
+        g.add(m);
+        const glow = a.glowSprite(hex, 1.1, 0);
+        glow.position.copy(m.position);
+        g.add(glow);
+        this.broken.lamps.push({ mesh: m, glow });
+      }
+    }
+
+    /* warning triangle a few metres back */
+    const tri = new THREE.Mesh(
+      new THREE.ConeGeometry(0.42, 0.66, 3),
+      new THREE.MeshBasicMaterial({ color: neon(0xff3a2a, 1.8), toneMapped: false, side: THREE.DoubleSide })
+    );
+    tri.position.set(0, 0.33, 9);
+    g.add(tri);
+    this.broken.triangle = tri;
+
+    g.visible = false;
+    this.scene.add(g);
+    this.broken.obj = g;
+  }
+
+  updateBroken(dt, st) {
+    const bd = this.broken;
+    if (!bd.active) {
+      bd.next -= dt;
+      if (bd.next > 0 || st.v < 8 || st.biome === 'TUNNEL' || st.biome === 'BRIDGE') return;
+      if (!bd.obj) this.buildBroken();
+      bd.active = true;
+      bd.s = st.s + 220 + this.rnd() * 220;
+      const side = this.rnd() < 0.75 ? 1 : -1;
+      this.road.point(bd.s, side * (ROAD_HALF + SHOULDER - 0.7), 0, this.tmp);
+      bd.obj.position.copy(this.tmp);
+      bd.obj.rotation.y = -this.road.poseAt(bd.s).h + (side > 0 ? 0 : Math.PI);
+      bd.obj.visible = true;
+      this.seen.broken++;
+      return;
+    }
+    const on = Math.sin(st.now * 4.4) > 0;          // hazards, all four together
+    for (const l of bd.lamps) {
+      l.mesh.visible = on;
+      l.glow.material.opacity = on ? 0.75 : 0;
+    }
+    if (st.s > bd.s + 120) {
+      bd.active = false;
+      bd.obj.visible = false;
+      bd.next = 220 + this.rnd() * 400;
+    }
   }
 
   /* ── the events themselves ────────────────────────────────── */
@@ -353,6 +558,8 @@ export class Events {
       rd.company = 0;
       rd.phase = this.rnd() * 6.28;
       rd.wantRel = -8 + this.rnd() * 24;      // where they end up sitting relative to you
+      rd.flash = 0;
+      rd.greeted = false;
       rd.latBase = 3.3;
       // same deal as the train: they either catch you, or you catch them
       if (this.rnd() < 0.5) {
@@ -375,6 +582,21 @@ export class Events {
        horizon. Two headlights on an empty road is the whole point of them. */
     if (rd.company === 0 && rd.life > 3 && Math.abs(rel) < 90) {
       rd.company = 25 + this.rnd() * 50;
+      /* Two riders meeting on an empty road at night flash their lamps at each
+         other. It costs nothing and it is the only moment in the game where
+         anything acknowledges you. */
+      rd.greeted = false;
+    }
+    if (rd.company > 0 && !rd.greeted && Math.abs(rel) < 40) {
+      rd.greeted = true;
+      rd.flash = 0.7;
+      if (st.onGreet) st.onGreet();
+    }
+    if (rd.flash > 0) {
+      rd.flash -= dt;
+      const on = Math.sin(rd.flash * 20) > -0.2;
+      rd.headGlow.material.opacity = on ? 1 : 0.25;
+      rd.headGlow.scale.setScalar(on ? 3.2 : 1.6);
     }
     if (rd.company > 0) {
       rd.company -= dt;
@@ -530,6 +752,8 @@ export class Events {
     this.updateTrain(dt, st);
     this.updateRider(dt, st);
     this.updateOverlook(dt, st);
+    this.updateWorks(dt, st);
+    this.updateBroken(dt, st);
     this.updateStorm(dt, st);
 
     this.flash = Math.max(0, this.flash - dt * 3.2);
@@ -543,6 +767,8 @@ export class Events {
   /** Long rides shift the world back to the origin; anything holding world
       coordinates has to come along. */
   rebase(offset) {
+    if (this.works.obj) this.works.obj.position.sub(offset);
+    if (this.broken.obj) this.broken.obj.position.sub(offset);
     if (this.plane.group) {
       this.plane.group.position.sub(offset);
       this.plane.from.sub(offset);

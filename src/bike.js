@@ -153,8 +153,11 @@ export class Bike {
     this.fill = new THREE.PointLight(0x9fb8ff, 4.5, 11, 1.7);
     this.fill.position.set(0.6, 2.6, 1.2);
     this.lean.add(this.fill);
-    this.bounce = new THREE.PointLight(0xffc98a, 2.6, 7, 1.6);
-    this.bounce.position.set(0, 0.1, -1.9);
+    /* Lifted off the road and pulled in close. Sitting at tarmac level two
+       metres ahead it stopped reading as bounce and became a spotlight pointed
+       at the ground — obvious once the road itself got darker. */
+    this.bounce = new THREE.PointLight(0xffc98a, 1.3, 5, 1.9);
+    this.bounce.position.set(0, 0.52, -1.15);
     this.lean.add(this.bounce);
 
     this.beams = [beam(48, 5.6, 0.022, 0xfff1de), beam(28, 2.4, 0.02, 0xffe9c8)];
@@ -162,6 +165,30 @@ export class Bike {
       b.position.set(0, 0.88, -0.72);
       this.lean.add(b);
     }
+
+    /* Indicators, front and rear. Only one pair is ever shown: from the chase
+       camera you can see the tail lamps and never the front ones — leaving both
+       on meant the front pair glowed through the bike from behind. In first
+       person it is the other way round. */
+    this.blinkers = { left: [], right: [] };
+    const lampGeo = new THREE.BoxGeometry(0.055, 0.055, 0.055);
+    for (const side of [-1, 1]) {
+      const key = side < 0 ? 'left' : 'right';
+      for (const [z, where] of [[-0.52, 'front'], [0.88, 'rear']]) {
+        const m = new THREE.Mesh(lampGeo, new THREE.MeshBasicMaterial({
+          color: neon(0xff9a1e, 2.4), toneMapped: false,
+        }));
+        m.position.set(side * 0.24, where === 'front' ? 0.86 : 0.9, z);
+        m.visible = false;
+        this.lean.add(m);
+        const glow = a.glowSprite(0xff9a1e, 0.34, 0);
+        glow.position.copy(m.position);
+        this.lean.add(glow);
+        this.blinkers[key].push({ mesh: m, glow, where });
+      }
+    }
+    this.signal = null;
+    this.blinkPhase = 0;
 
     this.tailMat = new THREE.MeshBasicMaterial({ color: neon(0xff1030, 2), toneMapped: false });
     const tail = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.07, 0.05), this.tailMat);
@@ -194,10 +221,17 @@ export class Bike {
     this.lean.add(this.spray);
 
     this.firstPerson = false;
+    this.highBeam = false;
+    this.flashLeft = 0;          // seconds of headlamp flash still owed
     this.leanAngle = 0;
     this.steerAngle = 0;
     this.wheelSpin = 0;
     this.bob = 0;
+  }
+
+  /** A flash of the headlamp: a greeting, or a warning before pulling out. */
+  flash(times = 2) {
+    this.flashLeft = Math.max(this.flashLeft, times * 0.34);
   }
 
   /** Hide the parts of the rider that the camera would otherwise be inside. */
@@ -240,10 +274,35 @@ export class Bike {
        but that turns photo mode into a white rectangle. Fade the beam volume
        when the camera is close and in front of it. */
     const fade = st.beamFade ?? 1;
-    this.headMat.color.copy(neon(0xfff0d8, 2.4 + Math.sin(performance.now() * 0.021) * 0.1));
-    this.spot.intensity = 110 + rain * 30;
-    for (const b of this.beams) b.material.uniforms.opacity.value = (0.014 + rain * 0.03) * fade;
-    this.headGlow.material.opacity = 0.5 * (0.35 + 0.65 * fade);
+
+    /* Main beam, and the brief flash of it that riders use to say things to
+       each other. Both widen the cone and throw further, so the road ahead
+       visibly opens up rather than just getting brighter. */
+    this.flashLeft = Math.max(0, this.flashLeft - dt);
+    const flashing = this.flashLeft > 0 && Math.sin(this.flashLeft * 18.5) > -0.2;
+    const main = this.highBeam || flashing;
+    const beamMul = main ? 2.3 : 1;
+
+    this.headMat.color.copy(neon(0xfff0d8, (main ? 4.2 : 2.4) + Math.sin(performance.now() * 0.021) * 0.1));
+    this.spot.intensity = (110 + rain * 30) * beamMul;
+    this.spot.angle = main ? 0.56 : 0.44;
+    this.spotTarget.position.z = main ? -70 : -40;
+    for (const b of this.beams) {
+      b.material.uniforms.opacity.value = (0.014 + rain * 0.03) * fade * beamMul;
+    }
+    this.headGlow.material.opacity = 0.5 * (0.35 + 0.65 * fade) * (main ? 1.6 : 1);
+
+    /* indicators: 1.5 Hz, roughly what a real relay does */
+    this.blinkPhase += dt;
+    const lit = !!this.signal && this.blinkPhase % 0.66 < 0.36;
+    const shown = this.firstPerson ? 'front' : 'rear';
+    for (const key of ['left', 'right']) {
+      for (const b of this.blinkers[key]) {
+        const on = lit && this.signal === key && b.where === shown;
+        b.mesh.visible = on;
+        b.glow.material.opacity = on ? 0.7 : 0;
+      }
+    }
 
     const braking = brake > 0.05;
     this.tailMat.color.copy(neon(0xff1030, braking ? 5 : 1.6));

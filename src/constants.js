@@ -14,4 +14,9 @@ export const BIOME = {
   GAS: 'GAS STATION',
   FOREST: 'FOREST',
   BRIDGE: 'BRIDGE',
+  COAST: 'COAST',
 };
+
+/** Which side the sea is on for a given chunk — the road and the props must
+    agree, or the ground gets built straight over the water. */
+export const coastSide = (chunkIndex) => (chunkIndex % 2 === 0 ? 1 : -1);

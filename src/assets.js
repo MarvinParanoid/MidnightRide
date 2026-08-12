@@ -178,7 +178,13 @@ export function assets() {
       emissive: 0x080b16, emissiveIntensity: 1, envMapIntensity: 0.16,
     }),
     foliage: new THREE.MeshStandardMaterial({ color: 0x080f0d, roughness: 1.0, metalness: 0.0 }),
-    water: new THREE.MeshStandardMaterial({ color: 0x02030a, roughness: 0.08, metalness: 1.0 }),
+    /* A perfect mirror at night reflects a black sky and disappears. A little
+       roughness catches the horizon glow, and a trace of emissive keeps the sea
+       a shade lighter than the land it meets. */
+    water: new THREE.MeshStandardMaterial({
+      color: 0x03060f, roughness: 0.16, metalness: 0.95,
+      emissive: 0x050b1c, emissiveIntensity: 1, envMapIntensity: 2.2,
+    }),
 
     /* paint — unlit so it survives the dark and feeds the bloom a little */
     paintWhite: new THREE.MeshBasicMaterial({ color: 0x8d97ab, toneMapped: false }),

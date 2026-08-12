@@ -153,6 +153,7 @@ export function stationFor(ctx, rnd = Math.random) {
     case 'HIGHWAY': return rnd() < 0.35 ? 'after' : 'inter';
     case 'FOREST': return 'after';
     case 'BRIDGE': return rnd() < 0.5 ? 'night' : 'inter';
+    case 'COAST': return rnd() < 0.7 ? 'after' : 'night';
     default: return 'night';
   }
 }

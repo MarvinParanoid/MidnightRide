@@ -14,6 +14,9 @@ const itch = process.env.MR_TARGET === 'itch';
 export default ({ command, isPreview }) => ({
   base: itch ? './' : command === 'build' || isPreview ? '/MidnightRide/' : '/',
   server: { host: '127.0.0.1', port: 5173, open: false },
+  // the built itch copy lives in the project root; without this the dev server
+  // scans its index.html as a second entry and re-optimises on every start
+  optimizeDeps: { entries: ['index.html'] },
   build: {
     target: 'es2022',
     outDir: itch ? 'dist-itch' : 'dist',

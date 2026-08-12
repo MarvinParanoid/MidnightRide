@@ -173,7 +173,10 @@ function controls(dt, now) {
       state.autoCamT = pacer.camHold;               // shorter holds while pressing on
       state.camMode = (state.camMode + 1) % CAM_MODES.length;
     }
-    return auto.update(dt, state, road, traffic, { rain: state.rain, pace: pacer.scale });
+    const out = auto.update(dt, state, road, traffic, { rain: state.rain, pace: pacer.scale, closedLane: events.closedLane });
+    bike.signal = auto.signal;
+    if (auto.wantFlash) { auto.wantFlash = false; bike.flash(1); }
+    return out;
   }
   if (input.active) {
     state.lastInput = now;
@@ -189,13 +192,21 @@ function controls(dt, now) {
       state.autoCamT = 30 + Math.random() * 30;
       state.camMode = (state.camMode + 1) % CAM_MODES.length;
     }
-    return auto.update(dt, state, road, traffic, { rain: state.rain });
+    const out = auto.update(dt, state, road, traffic, { rain: state.rain, closedLane: events.closedLane });
+    bike.signal = auto.signal;
+    if (auto.wantFlash) { auto.wantFlash = false; bike.flash(1); }
+    return out;
   }
+  bike.signal = null;
   return { throttle: input.throttle, brake: clamp(input.brake, 0, 1), steer: input.steer, boost: input.boost };
 }
 
 /* ── controls ──────────────────────────────────────────────── */
 input.on('KeyE', () => setAuto(!state.auto));
+input.on('KeyL', () => {
+  bike.highBeam = !bike.highBeam;
+  hud.toast(bike.highBeam ? 'MAIN BEAM' : 'DIPPED');
+});
 input.on('KeyC', () => {
   state.camMode = (state.camMode + 1) % CAM_MODES.length;
   state.autoCamT = 45;          // don't yank a camera you just chose
@@ -461,6 +472,7 @@ function updateWorld(dt, now) {
 
   const flash = events.update(dt, {
     s: state.s, v: state.v, lat: state.lat, now, biome, remote, rain: rainAmount, audio,
+    onGreet: () => bike.flash(2),
   });
   if (flash > 0.01) {
     const f = flash * (0.4 + Math.random() * 0.6);

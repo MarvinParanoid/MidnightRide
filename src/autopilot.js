@@ -10,6 +10,7 @@ const CRUISE = {
   [BIOME.HIGHWAY]: 52,
   [BIOME.FOREST]: 44,
   [BIOME.BRIDGE]: 45,
+  [BIOME.COAST]: 46,
   [BIOME.GAS]: 36,
 };
 
@@ -29,6 +30,13 @@ export class Autopilot {
     this.laneTimer = 20;
     this.mood = 0;
     this.t = 0;
+  }
+
+  /** What the indicators should be showing, if anything. */
+  get signal() {
+    const d = LANES[this.lane] - this.targetLat;
+    if (Math.abs(d) < 0.35) return null;
+    return d > 0 ? 'right' : 'left';
   }
 
   reset(state) {
@@ -93,7 +101,16 @@ export class Autopilot {
       if (this.laneIsClear(traffic, s, LANES[other])) {
         this.lane = other;
         this.laneTimer = 14 + Math.random() * 20;
+        this.wantFlash = true;      // a word before pulling out
       }
+    }
+
+    /* A coned-off lane is not negotiable: get out of it, and stay out until
+       the works are behind us. */
+    const shut = opts.closedLane;
+    if (shut && s > shut.from && s < shut.to) {
+      const bad = Math.abs(LANES[this.lane] - Math.abs(shut.lat)) < 1.2;
+      if (bad) this.lane = 1 - this.lane;
     } else if (this.laneTimer <= 0) {
       this.laneTimer = 25 + Math.random() * 45;
       if (this.laneIsClear(traffic, s, LANES[other]) && Math.random() < 0.5) this.lane = other;
