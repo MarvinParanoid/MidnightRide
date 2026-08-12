@@ -22,7 +22,15 @@ export class Music {
     const ctx = core.ctx;
 
     this.out = core.gain(1.5);
-    this.out.connect(core.master);
+    /* Everything below the lowest note anyone can hear is energy that only
+       eats headroom and turns the low mids to mud. The sub oscillator was
+       reaching 18 Hz on the lower keys. */
+    this.hp = core.filter('highpass', 36, 0.7);
+    this.tilt = core.filter('highshelf', 3600, 0.7);
+    this.tilt.gain.value = -4;          // takes the edge off without dulling it
+    this.out.connect(this.hp);
+    this.hp.connect(this.tilt);
+    this.tilt.connect(core.master);
 
     this.delay = ctx.createDelay(1.5);
     this.delay.delayTime.value = 0.34;
@@ -155,7 +163,7 @@ export class Music {
     const on = (this.enabled ? 1 : 0) * (st.level ?? 1);
     const target = {
       pad: on * (0.9 - smoothstep(0.35, 0.7, e) * 0.24) * makeup * sec.pad,
-      arp: on * (0.12 + smoothstep(0.06, 0.24, e) * 0.68) * makeup * sec.arp,
+      arp: on * (0.1 + smoothstep(0.06, 0.24, e) * 0.55) * makeup * sec.arp,
       drums: on * smoothstep(0.14, 0.30, e) * 1.1 * sec.drums * (st.drums === 'none' ? 0 : 1),
       bass: on * smoothstep(0.10, 0.26, e) * 1.0 * st.bassMul,
       lead: on * smoothstep(0.48, 0.68, e) * 0.6 * sec.lead * (st.lead ? 1 : 0),
@@ -214,12 +222,13 @@ export class Music {
 
     if (s === 0 && bar % 2 === 0) this.pad(voice(notes), t, (60 / this.bpm) * 8);
 
-    const rate = Math.max(1, e > 0.5 ? st.arpRate / 2 : st.arpRate);
+    // never faster than eighths: sixteenths for an hour is relentless
+    const rate = Math.max(2, e > 0.5 ? st.arpRate / 2 : st.arpRate);
     if (this.section.arp && s % rate === 0) {
       const cell = this.arpPattern[((step / rate) | 0) % this.arpPattern.length];
       if (cell) {
         const n = notes[cell.deg % notes.length] + st.arpOct + cell.oct;
-        this.pluck(n, t, 0.26 + Math.random() * 0.06);
+        this.pluck(n, t, 0.26 + Math.random() * 0.06, cell.vel);
       }
     }
 
@@ -242,7 +251,8 @@ export class Music {
 
     if (s === 0 && e > 0.55 && st.lead && this.section.lead) {
       for (const note of this.leadPhrase) {
-        this.lead(root + 24 + note.iv, t + note.at * this.stepDur, 0.34 + Math.random() * 0.2);
+        const n = notes[note.deg % notes.length] + 12 + note.oct;
+        this.lead(n, t + note.at * this.stepDur, 0.34 + Math.random() * 0.2);
       }
     }
   }
@@ -281,21 +291,23 @@ export class Music {
     }
   }
 
-  pluck(note, t, dur) {
+  pluck(note, t, dur, vel = 1) {
     const core = this.core;
     const o = core.ctx.createOscillator();
     o.type = 'sawtooth';
     o.frequency.value = mtof(note);
-    const lp = core.filter('lowpass', 3200, 6);
+    const lp = core.filter('lowpass', 3200, 2.2);
     const g = core.gain(0);
     o.connect(lp);
     lp.connect(g);
     g.connect(this.layers.arp);
 
-    lp.frequency.setValueAtTime(3600, t);
+    lp.frequency.setValueAtTime(2600, t);
     lp.frequency.exponentialRampToValueAtTime(520, t + dur);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.24, t + 0.008);
+    /* 8 ms was a click, and a click repeated on every eighth note for an hour
+       is what "harsh" actually sounds like — the notes were never the problem. */
+    g.gain.linearRampToValueAtTime(0.2 * vel, t + 0.022);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.start(t);
     o.stop(t + dur + 0.02);
@@ -304,6 +316,7 @@ export class Music {
   bass(note, t, dur) {
     const core = this.core;
     const ctx = core.ctx;
+    while (note < 28) note += 12;      // keep it on the instrument, not under it
     const g = core.gain(0);
     const lp = core.filter('lowpass', 380, 3);
     g.connect(lp);
@@ -315,7 +328,7 @@ export class Music {
     const o2 = ctx.createOscillator();
     o2.type = 'sine';
     o2.frequency.value = mtof(note - 12);
-    const g2 = core.gain(0.7);
+    const g2 = core.gain(0.45);
     o1.connect(g);
     o2.connect(g2);
     g2.connect(g);
@@ -354,7 +367,7 @@ export class Music {
     o.frequency.setValueAtTime(132, t);
     o.frequency.exponentialRampToValueAtTime(42, t + 0.11);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.9, t + 0.006);
+    g.gain.linearRampToValueAtTime(0.72, t + 0.006);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
     o.start(t);
     o.stop(t + 0.34);

@@ -18,8 +18,11 @@ const CH = {
 
 export const chordNotes = (root, type) => CH[type].map((i) => root + i);
 
-/* Intervals a lead can reach for over any of these chords without going sour. */
-const LEAD_IVS = [0, 3, 5, 7, 10, 12, 14, 15, 19];
+/* No fixed interval pool. A list like [0,3,5,7,10,...] contains the minor
+   third, and half the chords in these progressions are major — a minor third
+   over a major third is not colour, it is a wrong note, and picking it at
+   random is what made the radio sound broken. The lead takes chord tones,
+   resolved against whatever is actually sounding. */
 
 /**
  * A fresh arpeggio figure per section, rather than the one eight-note sequence
@@ -28,24 +31,37 @@ const LEAD_IVS = [0, 3, 5, 7, 10, 12, 14, 15, 19];
  * out over an hour.
  */
 export function makeArp(rnd = Math.random) {
-  const len = [8, 12, 16][(rnd() * 3) | 0];
+  /* Length has to divide into the bar. A twelve-cell figure over eight cells
+     per bar repeats every bar and a half, so its accents drift against the
+     chord changes and the drums — which is heard as something being subtly
+     wrong rather than as a rhythm. */
+  const len = rnd() < 0.5 ? 8 : 16;
   const pat = [];
   let deg = 0;
   for (let i = 0; i < len; i++) {
-    if (rnd() < 0.2) { pat.push(null); continue; }          // a hole in the figure
-    deg = rnd() < 0.55 ? (deg + 1) % 4 : (rnd() * 4) | 0;   // mostly stepwise
-    pat.push({ deg, oct: rnd() < 0.16 ? 12 : 0 });
+    if (rnd() < 0.16 || (i % 4 === 0 && rnd() < 0.12)) { pat.push(null); continue; }
+    // spread across the chord instead of circling back onto the root
+    deg += rnd() < 0.5 ? 1 : (rnd() < 0.5 ? 2 : -1);
+    deg = ((deg % 4) + 4) % 4;
+    pat.push({
+      deg,
+      oct: rnd() < 0.14 ? 12 : 0,
+      // every note at one volume is a machine; the beat gets the weight
+      vel: i % 4 === 0 ? 0.95 : 0.5 + rnd() * 0.28,
+    });
   }
   return pat;
 }
 
-/** A phrase of three to six notes with its own rhythm, not a fixed motif. */
+/** A phrase of three to six chord tones with its own rhythm. */
 export function makeLead(rnd = Math.random) {
   const n = 3 + ((rnd() * 4) | 0);
   const out = [];
   let at = (rnd() * 2) | 0;
+  let deg = (rnd() * 3) | 0;
   for (let i = 0; i < n; i++) {
-    out.push({ at, iv: LEAD_IVS[(rnd() * LEAD_IVS.length) | 0] });
+    deg = rnd() < 0.5 ? (deg + 1) % 4 : (rnd() * 4) | 0;
+    out.push({ at, deg, oct: rnd() < 0.35 ? 12 : 0 });
     at += 2 + ((rnd() * 5) | 0);
     if (at > 15) break;
   }
@@ -54,9 +70,10 @@ export function makeLead(rnd = Math.random) {
 
 /** Same chord, different spacing — rotate some notes up an octave. */
 export function voice(notes, rnd = Math.random) {
+  // rotation only: an extra octave on top of the station's own padOct pushed
+  // the pads into a thin register where they stopped sounding like pads
   const rot = (rnd() * notes.length) | 0;
-  const lift = rnd() < 0.3 ? 12 : 0;
-  return notes.map((n, i) => (i < rot ? n + 12 : n) + lift);
+  return notes.map((n, i) => (i < rot ? n + 12 : n));
 }
 
 export const STATIONS = {
@@ -104,7 +121,7 @@ export const STATIONS = {
       [[0, 'min'], [-2, 'maj'], [1, 'maj'], [0, 'min']],
       [[0, 'min7'], [1, 'maj'], [-4, 'maj7'], [1, 'maj']],
     ],
-    padCut: [260, 1150], padOct: 0, arpOct: 12, arpRate: 2,
+    padCut: [260, 1150], padOct: 12, arpOct: 12, arpRate: 2,
     lead: false, drums: 'tight', hats: true, bassMul: 1.35, delayBeats: 0.5,
     level: 0.78,        // the loudest of the four; pulled back to match
   },
@@ -117,7 +134,7 @@ export const STATIONS = {
       [[0, 'maj7'], [2, 'maj7'], [4, 'maj7'], [2, 'maj7']],
       [[0, 'sus4'], [5, 'sus4'], [-2, 'sus4'], [3, 'sus4']],
     ],
-    padCut: [220, 760], padOct: 12, arpOct: 36, arpRate: 4,
+    padCut: [220, 760], padOct: 12, arpOct: 24, arpRate: 4,
     lead: true, drums: 'none', hats: false, bassMul: 0.35, delayBeats: 1.5,
     level: 1.4,
   },
