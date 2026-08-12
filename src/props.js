@@ -6,6 +6,57 @@ import { BIOME, ROAD_HALF, SHOULDER, DS, N, CHUNK_LEN } from './constants.js';
 /* An object yawed to follow the road at heading h uses rotation.y = -h:
    its local +X is then the road's right vector and -Z is forward. */
 
+/**
+ * Light lying on the road, with one extra rule: it fades as the view flattens
+ * out. A flat additive quad seen almost edge-on compresses its whole falloff
+ * into a couple of pixels, so every pool near the horizon turns into a hard
+ * bright bar across the picture. Fading by the angle between the eye and the
+ * surface removes the bar and leaves the pool looking the same from above.
+ */
+const DECAL_VERT = /* glsl */ `
+  varying vec2 vUv;
+  varying vec3 vEye;
+  varying vec3 vUp;
+  void main() {
+    vUv = uv;
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vEye = -mv.xyz;
+    vUp = normalize(normalMatrix * vec3(0.0, 1.0, 0.0));
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+const DECAL_FRAG = /* glsl */ `
+  uniform sampler2D map;
+  uniform vec3 color;
+  varying vec2 vUv;
+  varying vec3 vEye;
+  varying vec3 vUp;
+  void main() {
+    /* Not a full fade to nothing: that kills the wet sheen everywhere, since
+       a chase camera sees almost the whole road at a shallow angle. Keep a
+       floor so the reflection survives, and take enough off the flattest
+       fragments that they stop stacking into a bar. */
+    float graze = abs(dot(normalize(vEye), vUp));
+    float fade = 0.15 + 0.85 * pow(graze, 0.4);
+    vec4 t = texture2D(map, vUv);
+    gl_FragColor = vec4(color * t.rgb * t.a * fade, 1.0);
+  }
+`;
+
+function decalMat(hex, intensity, map) {
+  return new THREE.ShaderMaterial({
+    uniforms: { map: { value: map }, color: { value: neon(hex, intensity) } },
+    vertexShader: DECAL_VERT,
+    fragmentShader: DECAL_FRAG,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+    toneMapped: false,
+  });
+}
+
 const emissiveCache = new Map();
 /* The map has to be part of the key. Keying on "has a map" alone means a pool
    and a smear of the same colour and strength silently share one material, and
@@ -25,6 +76,17 @@ function emissiveMat(hex, intensity, map = null, mapKey = '') {
       toneMapped: false,
     });
     emissiveCache.set(key, m);
+  }
+  return m;
+}
+
+const decalCache = new Map();
+function decalCached(hex, intensity, map, mapKey) {
+  const key = `${hex}|${intensity}|${mapKey}`;
+  let m = decalCache.get(key);
+  if (!m) {
+    m = decalMat(hex, intensity, map);
+    decalCache.set(key, m);
   }
   return m;
 }
@@ -70,12 +132,12 @@ export class ChunkCtx {
 
   /** A light band smeared down the wet road — fades away from its centreline. */
   smear(hex, intensity = 1) {
-    return this.get(`s${hex}_${intensity}`, emissiveMat(hex, intensity, this.a.tex.band, 'band'));
+    return this.get(`s${hex}_${intensity}`, decalCached(hex, intensity, this.a.tex.band, 'band'));
   }
 
   /** A soft pool of reflected light — fades in every direction. */
   pool(hex, intensity = 1) {
-    return this.get(`p${hex}_${intensity}`, emissiveMat(hex, intensity, this.a.tex.glow, 'glow'));
+    return this.get(`p${hex}_${intensity}`, decalCached(hex, intensity, this.a.tex.glow, 'glow'));
   }
 
   pose(s) {
@@ -162,7 +224,7 @@ function streetLamp(ctx, s, side) {
 
   // pool of light on the wet tarmac, stretched down the road
   const p = ctx.at(s, lat - side * 3.0, 0.02);
-  ctx.pool(LAMP_WARM, 0.42).decal(p, ctx.right(s), ctx.forward(s), 14, 24, 0.02);
+  ctx.pool(LAMP_WARM, 0.62).decal(p, ctx.right(s), ctx.forward(s), 14, 24, 0.02);
 }
 
 function guardrail(ctx, side) {
@@ -273,7 +335,7 @@ function city(ctx) {
            painted rectangle, not as a reflection. */
         if (rnd() < 0.45) {
           const rp = ctx.at(s, side * (ROAD_HALF - 1.5 - rnd() * 3), 0.02);
-          ctx.pool(hex, 0.26).decal(rp, ctx.right(s), ctx.forward(s), 8, 22, 0.02);
+          ctx.pool(hex, 0.4).decal(rp, ctx.right(s), ctx.forward(s), 8, 22, 0.02);
         }
       }
       d += w + 2 + rnd() * 10;
@@ -375,7 +437,7 @@ function tunnel(ctx) {
     ctx.emit(0xdff0ff, 2.2).box(p.x, p.y, p.z, 0.6, 0.14, 3.0, ctx.yaw(s));
     ctx.halo(p.clone(), 0xcfe6ff, 3.6, 0.2);
     const road = ctx.at(s, 0, 0.02);
-    ctx.pool(0xbfe0ff, 0.26).decal(road, ctx.right(s), ctx.forward(s), 10, 20, 0.02);
+    ctx.pool(0xbfe0ff, 0.4).decal(road, ctx.right(s), ctx.forward(s), 10, 20, 0.02);
   }
 
   // sodium bands running along both walls — the classic tunnel smear
@@ -394,7 +456,7 @@ function tunnel(ctx) {
       const s = ctx.s0 + i * DS;
       smear.push({ l: ctx.at(s, side * (ROAD_HALF - 0.2), 0.02), r: ctx.at(s, side * (ROAD_HALF - 3.2), 0.02) });
     }
-    ctx.smear(0xff7a2a, 0.28).ribbon(smear, 0.1);
+    ctx.smear(0xff7a2a, 0.42).ribbon(smear, 0.1);
   }
 
   // portals
@@ -440,7 +502,7 @@ function gasStation(ctx) {
     }
   }
   ctx.halo(new THREE.Vector3(cp.x, cp.y + 4.4, cp.z), 0xdff0ff, 24, 0.07);
-  ctx.pool(0xdff0ff, 0.22).decal(ctx.at(sMid, ROAD_HALF + 10, 0.03), ctx.right(sMid), ctx.forward(sMid), 30, 40, 0.03);
+  ctx.pool(0xdff0ff, 0.34).decal(ctx.at(sMid, ROAD_HALF + 10, 0.03), ctx.right(sMid), ctx.forward(sMid), 30, 40, 0.03);
 
   // pumps
   for (const dz of [-3.4, 3.4]) {
@@ -461,7 +523,7 @@ function gasStation(ctx) {
   metal.cylinder(tp.x, tp.y, tp.z, 0.2, 7, 6);
   ctx.emit(0xff2f6d, 1.9).box(tp.x, tp.y + 7.4, tp.z, 0.3, 2.6, 3.4, yaw);
   ctx.halo(new THREE.Vector3(tp.x, tp.y + 7.4, tp.z), 0xff2f6d, 7, 0.3);
-  ctx.pool(0xff2f6d, 0.45).decal(ctx.at(sMid + 20, ROAD_HALF - 2, 0.02), ctx.right(sMid), ctx.forward(sMid), 10, 32, 0.02);
+  ctx.pool(0xff2f6d, 0.62).decal(ctx.at(sMid + 20, ROAD_HALF - 2, 0.02), ctx.right(sMid), ctx.forward(sMid), 10, 32, 0.02);
 }
 
 function bridge(ctx) {
@@ -497,7 +559,7 @@ function bridge(ctx) {
       const s = ctx.s0 + i * DS;
       smear.push({ l: ctx.at(s, side * (ROAD_HALF - 0.4), 0.02), r: ctx.at(s, side * (ROAD_HALF - 3.6), 0.02) });
     }
-    ctx.smear(0x24d6ff, 0.26).ribbon(smear, 0.1);
+    ctx.smear(0x24d6ff, 0.4).ribbon(smear, 0.1);
   }
 
   // pylon + cables, once per bridge run

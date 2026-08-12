@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { assets, neon } from './assets.js';
-import { mulberry32, clamp } from './geo.js';
+import { mulberry32, clamp, damp } from './geo.js';
 import { BIOME, VIEW_DIST } from './constants.js';
 
 const CAR_PAINT = [0x101218, 0x1a1c22, 0x0d1420, 0x201418, 0x141a18];
@@ -160,6 +160,7 @@ export class Traffic {
     car.lat = dir > 0 ? lane : -lane;
     car.targetLat = car.lat;
     car.speed = kind === 'truck' ? 20 + rnd() * 5 : 24 + rnd() * 14;
+    car.cruise = car.speed;      // what it goes back to once the road clears
     car.s = dir > 0
       ? sBike + 60 + rnd() * (VIEW_DIST - 120)
       : sBike + VIEW_DIST * (0.5 + rnd() * 0.5);
@@ -185,6 +186,26 @@ export class Traffic {
 
   update(dt, sBike, latBike, speedBike) {
     const want = this.targetCount(this.road.biomeAt(sBike), this.road.remotenessAt(sBike));
+
+    /* Cars used to drive straight through each other: nothing looked ahead, so
+       a fast one simply overlapped a slow one and kept going. Each now follows
+       whatever is in front of it in its own lane and eases back up to its
+       cruising speed when the road clears. */
+    for (const car of this.cars) {
+      let lead = null;
+      for (const other of this.cars) {
+        if (other === car || other.dir !== car.dir) continue;
+        const gap = (other.s - car.s) * car.dir;
+        if (gap <= 0 || gap > 70) continue;
+        if (Math.abs(other.lat - car.lat) > 2.2) continue;
+        if (!lead || gap < lead.gap) lead = { gap, speed: other.speed, len: other.len };
+      }
+      if (lead && lead.gap < (lead.len + car.len) / 2 + 10) {
+        car.speed = damp(car.speed, Math.min(car.speed, lead.speed * 0.94), 2.2, dt);
+      } else {
+        car.speed = damp(car.speed, car.cruise, 0.5, dt);
+      }
+    }
 
     for (let i = this.cars.length - 1; i >= 0; i--) {
       const car = this.cars[i];

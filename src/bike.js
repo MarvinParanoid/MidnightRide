@@ -167,7 +167,7 @@ export class Bike {
     const tail = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.07, 0.05), this.tailMat);
     tail.position.set(0, 0.93, 0.96);
     this.lean.add(tail);
-    this.tailGlow = a.glowSprite(0xff1230, 1.4, 0.55);
+    this.tailGlow = a.glowSprite(0xff1230, 0.95, 0.32);
     this.tailGlow.position.copy(tail.position);
     this.lean.add(this.tailGlow);
 
@@ -247,8 +247,10 @@ export class Bike {
 
     const braking = brake > 0.05;
     this.tailMat.color.copy(neon(0xff1030, braking ? 5 : 1.6));
-    this.tailGlow.material.opacity = braking ? 1 : 0.4;
-    this.tailGlow.scale.setScalar(braking ? 2.4 : 1.4);
+    /* small enough to read as a lamp rather than a red disc painted on the
+       road — the bloom does the spreading */
+    this.tailGlow.material.opacity = braking ? 0.62 : 0.3;
+    this.tailGlow.scale.setScalar(braking ? 1.5 : 0.95);
 
     this.updateSpray(dt, speed, rain);
   }

@@ -329,6 +329,18 @@ function drive(dt, c) {
   /* the corner throws you toward the outside line */
   const k = road.curvature(state.s);
   state.lat -= k * state.v * state.v * 0.16 * dt;
+  /* Traffic is solid enough to squeeze past, not solid enough to crash into.
+     Riding straight through a car looked worse than any collision would, so
+     coming level with one pushes you aside instead — a motorcycle filtering
+     past, which is what a bike would do anyway. No damage, no fail state. */
+  for (const car of traffic.cars) {
+    const ds = car.s - state.s;
+    if (Math.abs(ds) > car.len / 2 + 2.2) continue;
+    const dl = state.lat - car.lat;
+    if (Math.abs(dl) > 2.1) continue;
+    state.lat += (2.1 - Math.abs(dl)) * Math.sign(dl || 1) * 3.2 * dt;
+  }
+
   /* You can put a wheel on the verge, but not drive out across the field: the
      bike rides at road height and the ground beside it is a metre lower, so
      far off the tarmac it visibly floats. The drag out here does the rest. */

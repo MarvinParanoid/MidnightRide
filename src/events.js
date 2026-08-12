@@ -174,6 +174,25 @@ export class Events {
     head.position.set(0, 1.45, -0.02);
     lean.add(body, rider, head);
 
+    /* Wheels. Left off originally on the theory that nobody sees them at night
+       — but your own headlight lights this rider up as you close on him, and a
+       motorcycle hovering an inch off the road is the first thing you notice. */
+    const tyre = new THREE.TorusGeometry(0.33, 0.085, 6, 16);
+    tyre.rotateY(Math.PI / 2);
+    const rim = new THREE.CylinderGeometry(0.2, 0.2, 0.07, 8);
+    rim.rotateZ(Math.PI / 2);
+    const metal = new THREE.MeshStandardMaterial({
+      color: 0x5a6472, roughness: 0.3, metalness: 1, envMapIntensity: 1.2,
+    });
+    this.rider.wheels = [];
+    for (const z of [0.72, -0.74]) {
+      const w = new THREE.Group();
+      w.position.set(0, 0.33, z);
+      w.add(new THREE.Mesh(tyre, dark), new THREE.Mesh(rim, metal));
+      lean.add(w);
+      this.rider.wheels.push(w);
+    }
+
     const tail = new THREE.Mesh(
       new THREE.BoxGeometry(0.2, 0.07, 0.05),
       new THREE.MeshBasicMaterial({ color: neon(0xff1030, 2.4), toneMapped: false })
@@ -384,6 +403,7 @@ export class Events {
     rd.obj.position.copy(this.tmp);
     rd.obj.rotation.set(pose.pitch, -pose.h, 0, 'YXZ');
     rd.lean.rotation.z = clamp(this.road.curvature(rd.s) * rd.speed * rd.speed * 0.02, -0.6, 0.6);
+    for (const w of rd.wheels) w.rotation.x += (rd.speed / 0.33) * dt;
 
     if (this.sounds) {
       const level = Math.pow(1 - clamp(Math.abs(rel) / 220, 0, 1), 2.4);
