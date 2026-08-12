@@ -148,9 +148,14 @@ export class Sky {
     this.envAge += dt;
     if (this.envAge < this.envEvery) return;
     this.envAge = 0;
-    const prev = this.targetScene.environment;
-    this.targetScene.environment = this.pmrem.fromScene(this.envScene, 0.04, 1, 5000).texture;
-    if (prev) prev.dispose();
+    /* fromScene() hands back a whole render target, not just a texture.
+       Disposing only `.texture` leaves the framebuffer behind — one every few
+       seconds, which is invisible in a play session and fatal in a stream that
+       runs for hours. Keep the target and dispose the target. */
+    const rt = this.pmrem.fromScene(this.envScene, 0.04, 1, 5000);
+    if (this.envRT) this.envRT.dispose();
+    this.envRT = rt;
+    this.targetScene.environment = rt.texture;
   }
 
   update(pal, cameraPos, headingVec) {

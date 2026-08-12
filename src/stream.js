@@ -71,31 +71,54 @@ export class StreamMode {
 }
 
 /**
- * Pacing for a channel rather than a ride: eighty to a hundred and twenty most
- * of the time, because two hours of 190 km/h on a second monitor is exhausting
- * rather than hypnotic — with an occasional stretch of speed so it never
- * settles into one number.
+ * Pacing for a channel. Not "faster" — more varied: a single speed held for two
+ * hours is monotonous whatever the number. So the ride moves between three
+ * moods, and the fast stretches feel fast because there are slow ones to
+ * measure them against.
  */
+const MOODS = [
+  { name: 'cruise', scale: 0.80, min: 70, span: 90, weight: 0.5 },
+  { name: 'push', scale: 1.05, min: 25, span: 30, weight: 0.32 },
+  { name: 'ease', scale: 0.62, min: 40, span: 50, weight: 0.18 },
+];
+
 export class StreamPacer {
   constructor(rnd = Math.random) {
     this.rnd = rnd;
-    this.burst = 0;
-    this.next = 150 + rnd() * 300;
+    this.mood = MOODS[0];
+    this.left = 60;
+    this.current = MOODS[0].scale;
+  }
+
+  pick() {
+    let r = this.rnd();
+    for (const m of MOODS) {
+      r -= m.weight;
+      if (r <= 0) return m;
+    }
+    return MOODS[0];
   }
 
   update(dt) {
-    if (this.burst > 0) {
-      this.burst -= dt;
-      if (this.burst <= 0) this.next = 180 + this.rnd() * 360;
-    } else {
-      this.next -= dt;
-      if (this.next <= 0) this.burst = 20 + this.rnd() * 25;
+    this.left -= dt;
+    if (this.left <= 0) {
+      let next = this.pick();
+      if (next === this.mood) next = MOODS[0] === this.mood ? MOODS[1] : MOODS[0];
+      this.mood = next;
+      this.left = next.min + this.rnd() * next.span;
     }
-    return this.burst > 0 ? 1.45 : 1;
+    // ease between moods rather than stepping: the throttle should sound like
+    // someone changing their mind, not like a switch
+    this.current += (this.mood.scale - this.current) * Math.min(1, dt * 0.35);
+    return this.current;
   }
 
-  /** Base scale on the autopilot's normal cruising speeds. */
   get scale() {
-    return clamp(0.62 * (this.burst > 0 ? 1.45 : 1), 0.4, 1.1);
+    return this.current;
+  }
+
+  /** Hold a camera angle for less time when pressing on. */
+  get camHold() {
+    return this.mood.name === 'push' ? 20 + this.rnd() * 20 : 40 + this.rnd() * 50;
   }
 }

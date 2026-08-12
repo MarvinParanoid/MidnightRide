@@ -170,7 +170,7 @@ function controls(dt, now) {
     pacer.update(dt);
     state.autoCamT -= dt;
     if (state.autoCamT <= 0) {
-      state.autoCamT = 30 + Math.random() * 60;     // 30–90s, as unhurried as the ride
+      state.autoCamT = pacer.camHold;               // shorter holds while pressing on
       state.camMode = (state.camMode + 1) % CAM_MODES.length;
     }
     return auto.update(dt, state, road, traffic, { rain: state.rain, pace: pacer.scale });
