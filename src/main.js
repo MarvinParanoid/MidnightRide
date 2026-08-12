@@ -8,10 +8,10 @@ import { Traffic } from './traffic.js';
 import { Rain } from './rain.js';
 import { Sky } from './sky.js';
 import { Events } from './events.js';
-import { createComposer } from './postfx.js';
+import { createComposer, applyBloomScale } from './postfx.js';
 import { Input, isTouchDevice } from './input.js';
 import { Autopilot } from './autopilot.js';
-import { detectQuality } from './quality.js';
+import { detectQuality, QualityGuard, TIERS } from './quality.js';
 import { PhotoMode } from './photo.js';
 import { Hud, formatClock } from './hud.js';
 import { palette, nightHourFromLocal, placeName, weatherForToday } from './timeofday.js';
@@ -44,7 +44,8 @@ const { composer, bloom, grade } = createComposer(renderer, scene, camera, quali
 const road = new Road(scene);
 const bike = new Bike(scene);
 const traffic = new Traffic(scene, road);
-const rain = new Rain(scene, quality.rainDrops);
+const rain = new Rain(scene, 5000);
+rain.setDensity(quality.rain);
 const sky = new Sky(scene);
 sky.attachEnvironment(renderer, scene, quality.envEvery);
 const hud = new Hud();
@@ -260,11 +261,28 @@ document.addEventListener('keydown', (e) => {
   if (!running && (e.code === 'Space' || e.code === 'Enter' || e.code === 'KeyW')) begin();
 });
 
+/**
+ * Applying a tier is three knobs: how many pixels we draw, how big the bloom
+ * buffers are, and how much rain is in the air. Everything else stays put, so
+ * a change is invisible apart from the frame rate recovering.
+ */
+const viewSize = new THREE.Vector2();
+function applyTier(tier) {
+  renderer.setPixelRatio(Math.min(devicePixelRatio, tier.pixelRatio));
+  renderer.setSize(innerWidth, innerHeight);
+  // in drawing-buffer pixels, or the post chain silently halves on HiDPI
+  renderer.getDrawingBufferSize(viewSize);
+  composer.setSize(viewSize.x, viewSize.y);
+  applyBloomScale(bloom, viewSize, tier.bloomScale);
+  rain.setDensity(tier.rain);
+  sky.envEvery = tier.envEvery;
+}
+const guard = new QualityGuard(quality.index, applyTier);
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
+  applyTier(TIERS[guard.index]);     // composer.setSize resets the bloom buffers
 });
 
 /* ── simulation ────────────────────────────────────────────── */
@@ -562,12 +580,19 @@ function frame() {
   /* the drawing buffer is only intact for the rest of this task */
   if (photo.wantShot && photo.maybeCapture(place)) { hud.flashShot(); telemetry.data.shots++; }
 
+  /* let the frame rate decide the quality, but not while a recording or a
+     photo pose is holding the loop to a different rhythm */
+  guard.update(dt, fps, record.active || photo.active);
+
   /* bookkeeping for the single end-of-session beacon */
   if (!telemetry.data.ok) telemetry.set({ ok: true });
   telemetry.data.maxKmh = Math.max(telemetry.data.maxKmh, state.v * 3.6);
   telemetry.data.km = state.odo / 1000;
   telemetry.data.fps = fps;
   telemetry.data.seen = events.seen;
+  telemetry.data.quality = guard.name;
+  telemetry.data.qStart = guard.startName;
+  telemetry.data.qChanges = guard.changes;
   if (running) {
     rideTime += dt;
     if (state.auto) autoTime += dt;
@@ -625,7 +650,7 @@ function teleport(s, v = state.v) {
 /* a handle for poking at the ride from the console */
 window.__mr = {
   THREE, renderer, scene, camera, road, bike, traffic, events, input, state,
-  teleport, setAuto, record, photo, composer,
+  teleport, setAuto, record, photo, composer, guard,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },

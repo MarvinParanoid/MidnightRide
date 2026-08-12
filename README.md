@@ -55,9 +55,13 @@ each touch remembers where it began, so you can put a thumb down anywhere
 without the bike snapping sideways, and a resting thumb on the right just holds
 the throttle open. Drag down on the right to brake.
 
-Small screens also get a lighter build automatically: no pixel-ratio scaling,
-a third of the rain, a half-resolution bloom chain and a slower environment
-refresh. Landscape only — portrait asks you to turn the phone.
+Quality adapts to what the machine actually does rather than to what it claims
+to be. Everything but a phone starts on the high tier; if the frame rate stays
+under 45 for four seconds it steps down (pixel ratio, bloom resolution, rain
+density, environment refresh), and it steps back up if the frame rate recovers
+and holds. The first version guessed from core count and window height, and put
+a desktop running at 76 fps into the cut-down renderer — the telemetry caught it
+in the very first session. Landscape only — portrait asks you to turn the phone.
 
 ## What is generated, and when
 

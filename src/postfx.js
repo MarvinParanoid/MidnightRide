@@ -68,22 +68,32 @@ const GradeShader = {
   `,
 };
 
+/**
+ * Run the bloom chain at a fraction of the screen resolution. Its radius is in
+ * buffer pixels, so at half res the same number smears twice as far across the
+ * picture — scale it back down to match, or a phone gets a different look
+ * rather than a cheaper one.
+ */
+export function applyBloomScale(bloom, size, scale) {
+  bloom.setSize(Math.max(2, size.x * scale), Math.max(2, size.y * scale));
+  bloom.radius = 0.72 * (0.35 + 0.65 * scale);
+}
+
 export function createComposer(renderer, scene, camera, quality = {}) {
   const { bloomScale = 1, samples = 2 } = quality;
-  const size = renderer.getSize(new THREE.Vector2());
+  /* Drawing-buffer pixels, not CSS pixels. The composer sizes its targets in
+     real pixels, so feeding it CSS ones renders the whole post chain at half
+     resolution on any HiDPI screen. */
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   const composer = new EffectComposer(
     renderer,
     new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples })
   );
   composer.addPass(new RenderPass(scene, camera));
 
-  /* The bloom chain can run at half resolution without anyone noticing — but
-     its radius is in buffer pixels, so at half res the same number smears
-     twice as far across the screen. Scale it back down to match. */
-  const bloom = new UnrealBloomPass(
-    size.clone().multiplyScalar(bloomScale), 0.95, 0.72 * (0.35 + 0.65 * bloomScale), 0.42
-  );
+  const bloom = new UnrealBloomPass(size.clone().multiplyScalar(bloomScale), 0.95, 0.72, 0.42);
   composer.addPass(bloom);
+  applyBloomScale(bloom, size, bloomScale);   // after addPass: it re-sizes passes
 
   const grade = new ShaderPass(GradeShader);
   composer.addPass(grade);

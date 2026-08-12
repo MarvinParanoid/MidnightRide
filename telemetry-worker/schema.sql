@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- not `returning`: that is a reserved word in SQLite (the RETURNING clause)
   is_returning INTEGER,
   device     TEXT,               -- desktop | touch
-  quality    TEXT,               -- high | low
+  quality    TEXT,               -- tier the session ended on: high | mid | low
+  q_start    TEXT,               -- tier it started on, before the frame rate had its say
+  q_changes  INTEGER,            -- how many times it stepped
   w          INTEGER,            -- viewport, rounded to the nearest 100
   h          INTEGER,
   country    TEXT                -- from Cloudflare's edge, not from the payload

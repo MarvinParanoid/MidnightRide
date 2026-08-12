@@ -32,6 +32,16 @@ npx wrangler d1 execute midnight-ride --remote \
   --command "SELECT ts, secs, bucket, km, fps, device, ok FROM sessions ORDER BY id DESC LIMIT 5"
 ```
 
+## Migrations
+
+The schema gained two columns after the first deploy. If your database predates
+them:
+
+```bash
+npx wrangler d1 execute midnight-ride --remote --file=migrations/001-quality-tiers.sql
+npx wrangler deploy
+```
+
 ## Reading it
 
 ```

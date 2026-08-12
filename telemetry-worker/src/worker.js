@@ -55,8 +55,8 @@ export default {
       await env.DB.prepare(
         `INSERT INTO sessions
            (ts, day, ok, started, fail, secs, bucket, km, max_kmh, fps,
-            auto_share, photo, shots, cams, seen, is_returning, device, quality, w, h, country)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)`
+            auto_share, photo, shots, cams, seen, is_returning, device, quality, q_start, q_changes, w, h, country)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)`
       ).bind(
         now.getTime(),
         now.toISOString().slice(0, 10),
@@ -81,7 +81,9 @@ export default {
         }),
         flag(d.returning),
         pick(d.device, ['desktop', 'touch']),
-        pick(d.quality, ['high', 'low']),
+        pick(d.quality, ['high', 'mid', 'low']),
+        pick(d.qStart, ['high', 'mid', 'low']),
+        num(d.qChanges, 0, 99),
         num(d.w, 0, 20000),
         num(d.h, 0, 20000),
         (req.cf && req.cf.country) || null
@@ -96,8 +98,14 @@ export default {
 
 /** The handful of numbers actually worth looking at after a launch. */
 async function report(url, env) {
-  if (!env.REPORT_KEY || url.searchParams.get('key') !== env.REPORT_KEY) {
-    return new Response('nope', { status: 403 });
+  /* Two different failures, so say which: "no secret on the worker" and "wrong
+     key in the URL" look identical otherwise, and you can waste a while
+     guessing at the wrong one. Neither message reveals the key. */
+  if (!env.REPORT_KEY) {
+    return new Response('REPORT_KEY is not set on this worker: npx wrangler secret put REPORT_KEY', { status: 403 });
+  }
+  if (url.searchParams.get('key') !== env.REPORT_KEY) {
+    return new Response('wrong key', { status: 403 });
   }
   const days = Math.min(365, Math.max(1, Number(url.searchParams.get('days')) || 30));
   const since = Date.now() - days * 86400000;
@@ -119,8 +127,8 @@ async function report(url, env) {
        FROM sessions WHERE ts > ?1 AND started = 1`),
     q(`SELECT bucket, COUNT(*) AS n FROM sessions
        WHERE ts > ?1 AND started = 1 GROUP BY bucket ORDER BY n DESC`),
-    q(`SELECT device, quality, COUNT(*) AS n, ROUND(AVG(fps), 0) AS fps
-       FROM sessions WHERE ts > ?1 GROUP BY device, quality`),
+    q(`SELECT device, q_start AS started_at, quality AS ended_at, COUNT(*) AS n, ROUND(AVG(fps), 0) AS fps
+       FROM sessions WHERE ts > ?1 GROUP BY device, q_start, quality`),
     q(`SELECT
          SUM(json_extract(seen, '$.train'))     AS trains,
          SUM(json_extract(seen, '$.rider'))     AS riders,

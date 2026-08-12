@@ -70,11 +70,21 @@ export class Rain {
     this.mesh = new THREE.LineSegments(g, this.mat);
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
+    this.count = count;
 
     this.drift = this.mat.uniforms.drift.value;
     this.vel = new THREE.Vector3();
     this.amount = 0;
     this.wind = new THREE.Vector3();
+  }
+
+  /**
+   * Thin the rain without rebuilding anything: the drops are all allocated up
+   * front, so drawing fewer of them is a draw-range change.
+   */
+  setDensity(fraction) {
+    const n = Math.max(1, Math.floor(this.count * fraction));
+    this.mesh.geometry.setDrawRange(0, n * 2);
   }
 
   /**

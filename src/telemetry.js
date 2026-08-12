@@ -46,6 +46,8 @@ class Telemetry {
       returning: false,
       device: 'desktop',
       quality: 'high',
+      qStart: 'high',   // where it started, before the frame rate had its say
+      qChanges: 0,
       w: 0, h: 0,
     };
 
