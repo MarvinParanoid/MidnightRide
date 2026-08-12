@@ -1,14 +1,6 @@
 import { mtof } from './core.js';
 import { clamp, smoothstep } from '../geo.js';
-import { STATIONS, chordNotes, stationFor, pickSection } from './stations.js';
-
-const ARP = [0, 2, 1, 3, 2, 0, 3, 1];
-const LEAD = [
-  [12, 10, 7, 12],
-  [15, 12, 10, 7],
-  [12, 15, 19, 15],
-  [10, 7, 5, 7],
-];
+import { STATIONS, chordNotes, stationFor, pickSection, makeArp, makeLead, voice } from './stations.js';
 
 const KEYS = [45, 43, 47, 40, 50];        // A, G, B, E, D — comfortable roots
 const DWELL = 95;                          // seconds a station holds before it may change
@@ -57,6 +49,8 @@ export class Music {
     this.station = STATIONS.night;
     this.progression = this.station.progressions[0];
     this.section = { name: 'full', drums: 1, arp: 1, lead: 1, pad: 1 };
+    this.arpPattern = makeArp();
+    this.leadPhrase = makeLead();
 
     this.bpm = 88;
     this.step = 0;
@@ -199,6 +193,8 @@ export class Music {
       if (this.wantStation) this.changeStation(this.wantStation, t);
       if (bar % 8 === 0) {
         this.section = pickSection();
+        this.arpPattern = makeArp();          // a new figure every eight bars
+        if (Math.random() < 0.5) this.leadPhrase = makeLead();
         if (Math.random() < 0.4) {
           this.progression = st.progressions[(Math.random() * st.progressions.length) | 0];
         }
@@ -216,19 +212,27 @@ export class Music {
 
     if (s % 4 === 0) this.beats.push(t);
 
-    if (s === 0 && bar % 2 === 0) this.pad(notes, t, (60 / this.bpm) * 8);
+    if (s === 0 && bar % 2 === 0) this.pad(voice(notes), t, (60 / this.bpm) * 8);
 
-    const rate = e > 0.5 ? st.arpRate / 2 : st.arpRate;
-    if (this.section.arp && s % Math.max(1, rate) === 0) {
-      const n = notes[ARP[(step / Math.max(1, rate)) % ARP.length] % notes.length] + st.arpOct;
-      this.pluck(n, t, 0.26 + Math.random() * 0.06);
+    const rate = Math.max(1, e > 0.5 ? st.arpRate / 2 : st.arpRate);
+    if (this.section.arp && s % rate === 0) {
+      const cell = this.arpPattern[((step / rate) | 0) % this.arpPattern.length];
+      if (cell) {
+        const n = notes[cell.deg % notes.length] + st.arpOct + cell.oct;
+        this.pluck(n, t, 0.26 + Math.random() * 0.06);
+      }
     }
 
     if (st.drums !== 'none' && this.section.drums) {
       const four = st.drums === 'four';
-      if (s === 0 || s === 8 || (e > 0.55 && (s === 4 || s === 12))) this.kick(t);
+      const fill = bar % 8 === 7;               // last bar of the section
+      if (s === 0 || s === 8 || (e > 0.55 && (s === 4 || s === 12))) {
+        if (!(fill && s === 8 && Math.random() < 0.5)) this.kick(t);
+      }
       if (four ? (s === 4 || s === 12) : (s === 4 || s === 12 || s === 14)) this.snare(t);
-      if (st.hats && s % 2 === 0) this.hat(t, s % 4 === 0 ? 0.5 : 0.32);
+      // a fill rolls out of the section instead of the pattern simply repeating
+      if (fill && s >= 12 && s % 2 === 0 && Math.random() < 0.7) this.snare(t + this.stepDur * 0.5);
+      if (st.hats && s % 2 === 0) this.hat(t, s % 4 === 0 ? 0.5 : 0.26 + Math.random() * 0.16);
       if (st.hats && e > 0.6 && s === 14) this.hat(t, 0.6, true);
     }
 
@@ -237,8 +241,9 @@ export class Music {
     }
 
     if (s === 0 && e > 0.55 && st.lead && this.section.lead) {
-      const motif = LEAD[Math.floor(bar / 2) % LEAD.length];
-      motif.forEach((iv, i) => this.lead(root + 24 + iv, t + i * this.stepDur * 3, 0.42));
+      for (const note of this.leadPhrase) {
+        this.lead(root + 24 + note.iv, t + note.at * this.stepDur, 0.34 + Math.random() * 0.2);
+      }
     }
   }
 

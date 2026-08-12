@@ -18,6 +18,47 @@ const CH = {
 
 export const chordNotes = (root, type) => CH[type].map((i) => root + i);
 
+/* Intervals a lead can reach for over any of these chords without going sour. */
+const LEAD_IVS = [0, 3, 5, 7, 10, 12, 14, 15, 19];
+
+/**
+ * A fresh arpeggio figure per section, rather than the one eight-note sequence
+ * the whole soundtrack used to share. Rests matter as much as notes: the old
+ * pattern never stopped, and relentless is the fastest way to wear a listener
+ * out over an hour.
+ */
+export function makeArp(rnd = Math.random) {
+  const len = [8, 12, 16][(rnd() * 3) | 0];
+  const pat = [];
+  let deg = 0;
+  for (let i = 0; i < len; i++) {
+    if (rnd() < 0.2) { pat.push(null); continue; }          // a hole in the figure
+    deg = rnd() < 0.55 ? (deg + 1) % 4 : (rnd() * 4) | 0;   // mostly stepwise
+    pat.push({ deg, oct: rnd() < 0.16 ? 12 : 0 });
+  }
+  return pat;
+}
+
+/** A phrase of three to six notes with its own rhythm, not a fixed motif. */
+export function makeLead(rnd = Math.random) {
+  const n = 3 + ((rnd() * 4) | 0);
+  const out = [];
+  let at = (rnd() * 2) | 0;
+  for (let i = 0; i < n; i++) {
+    out.push({ at, iv: LEAD_IVS[(rnd() * LEAD_IVS.length) | 0] });
+    at += 2 + ((rnd() * 5) | 0);
+    if (at > 15) break;
+  }
+  return out;
+}
+
+/** Same chord, different spacing — rotate some notes up an octave. */
+export function voice(notes, rnd = Math.random) {
+  const rot = (rnd() * notes.length) | 0;
+  const lift = rnd() < 0.3 ? 12 : 0;
+  return notes.map((n, i) => (i < rot ? n + 12 : n) + lift);
+}
+
 export const STATIONS = {
   /* The default: the city, neon, something to nod to. */
   night: {
@@ -28,10 +69,12 @@ export const STATIONS = {
       [[0, 'min7'], [3, 'maj7'], [-2, 'maj'], [-4, 'maj7']],
       [[0, 'min'], [-5, 'min7'], [-4, 'maj7'], [-2, 'maj']],
       [[0, 'min9'], [-2, 'maj'], [-4, 'maj7'], [-4, 'maj7']],
+      [[0, 'min7'], [-7, 'maj7'], [-4, 'maj7'], [-2, 'maj']],
+      [[-4, 'maj7'], [-2, 'maj'], [0, 'min7'], [0, 'min7']],
     ],
     padCut: [420, 1700], padOct: 12, arpOct: 24, arpRate: 2,
     lead: true, drums: 'four', hats: true, bassMul: 1, delayBeats: 0.75,
-    level: 1.0,
+    level: 0.92,
   },
 
   /* Empty road, nobody about. Slower, wider, barely any percussion. */
@@ -42,10 +85,12 @@ export const STATIONS = {
       [[0, 'min9'], [-5, 'maj7'], [0, 'min9'], [-7, 'maj7']],
       [[0, 'sus4'], [-2, 'maj7'], [-4, 'maj7'], [-5, 'maj7']],
       [[0, 'min7'], [-4, 'maj6'], [0, 'min7'], [-2, 'sus4']],
+      [[-5, 'maj7'], [0, 'min9'], [-7, 'maj7'], [-5, 'maj7']],
+      [[0, 'sus4'], [0, 'min9'], [-4, 'maj7'], [-4, 'maj6']],
     ],
     padCut: [300, 950], padOct: 12, arpOct: 24, arpRate: 4,
     lead: false, drums: 'none', hats: false, bassMul: 0.55, delayBeats: 1.5,
-    level: 1.55,        // ambient is meant to sit lower, but not fall out of the mix
+    level: 1.75,        // ambient is meant to sit lower, but not fall out of the mix
   },
 
   /* Tunnels and trunk roads: lower, tighter, less melody. */
@@ -56,6 +101,8 @@ export const STATIONS = {
       [[0, 'min'], [1, 'maj'], [0, 'min'], [-2, 'maj']],
       [[0, 'min7'], [-2, 'maj'], [-4, 'maj7'], [-2, 'maj']],
       [[0, 'min'], [0, 'min'], [1, 'maj'], [-4, 'maj7']],
+      [[0, 'min'], [-2, 'maj'], [1, 'maj'], [0, 'min']],
+      [[0, 'min7'], [1, 'maj'], [-4, 'maj7'], [1, 'maj']],
     ],
     padCut: [260, 1150], padOct: 0, arpOct: 12, arpRate: 2,
     lead: false, drums: 'tight', hats: true, bassMul: 1.35, delayBeats: 0.5,
