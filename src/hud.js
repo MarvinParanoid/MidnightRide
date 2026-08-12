@@ -53,10 +53,10 @@ export class Hud {
       <div class="tag">No destination. No finish line.<br />Just you, the road, and the night.</div>
       <div class="sub" data-startsub>—</div>
       <div class="back" data-startback></div>
-      <div class="keys" data-startkeys>
-        W / S throttle &amp; brake · A / D steer · Shift boost<br />
-        E autopilot · C camera · F photo mode · R rain · M music
-      </div>
+      <!-- No key list on purpose. The hints sit in the corner while you ride,
+           and a first screen is not the place for a manual. Touch devices get
+           one line here instead, since they have no corner hints. -->
+      <div class="keys" data-startkeys></div>
       <div class="go" data-startgo>press any key to ride</div>
     `;
     document.body.appendChild(this.start);
