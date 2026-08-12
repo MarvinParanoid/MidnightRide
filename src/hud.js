@@ -45,6 +45,7 @@ export class Hud {
     };
     this.toastT = 0;
     this.lastSpeed = -1;
+    root.classList.add('pre');      // interface stays out of the title screen
 
     this.start = document.createElement('div');
     this.start.id = 'start';
@@ -115,11 +116,15 @@ export class Hud {
       `Welcome back, rider — ${km < 1000 ? km.toFixed(0) : (km / 1000).toFixed(1) + 'k'} km travelled`;
   }
 
+  /** Lift the black so the world shows through behind the title. */
+  revealWorld(delay = 700) {
+    setTimeout(() => this.fade.classList.add('clear'), delay);
+  }
+
   dismiss() {
     this.start.classList.add('gone');
+    this.root.classList.remove('pre');
     setTimeout(() => this.start.remove(), 1300);
-    // hold the black a moment longer than the title, then let the road appear
-    setTimeout(() => this.fade.classList.add('clear'), 900);
   }
 
   photoBar(on, readout) {

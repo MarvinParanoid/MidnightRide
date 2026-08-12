@@ -152,7 +152,7 @@ function controls(dt, now) {
   if (input.active) {
     state.lastInput = now;
     if (state.auto) setAuto(false);
-  } else if (!state.auto && running && now - state.lastInput > IDLE_BEFORE_AUTO) {
+  } else if (!state.auto && (running || attract) && now - state.lastInput > IDLE_BEFORE_AUTO) {
     setAuto(true);
   }
 
@@ -213,12 +213,29 @@ input.on('KeyT', () => {
   hud.toast(`TIME +${state.timeOffset}h`);
 });
 
+/* ── attract ───────────────────────────────────────────────────
+   Before anyone touches anything the world is already riding, on the long
+   lens, behind the title. It costs nothing — the loop was rendering that
+   frame anyway — and it means the first thing you see is the game itself
+   rather than a colour.                                                     */
+let attract = true;
+state.auto = true;                 // silently: no toast, nobody is watching yet
+state.camMode = 2;                 // cinematic, from the verge
+state.autoCamT = 1e9;              // and it stays there: no cycling under the title
+hud.setAuto(true);
+hud.revealWorld(700);
+
 /* ── start ─────────────────────────────────────────────────── */
 let running = false;
 async function begin() {
   if (running) return;
   running = true;
+  attract = false;
   hud.dismiss();
+  state.odo = 0;                 // the attract lap isn't yours; don't bank it
+  state.camMode = 0;             // hand back the riding camera
+  state.autoCamT = 45;
+  if (!isTouchDevice) setAuto(false);   // desktop starts in your hands
   audio = new AudioCore();
   engine = new EngineSound(audio);
   music = new Music(audio);
@@ -468,7 +485,7 @@ function frame() {
   clock += simDt;
   const now = clock;
 
-  if (running && !photo.active) drive(dt, controls(dt, now));
+  if ((running || attract) && !photo.active) drive(dt, controls(dt, now));
 
   road.update(state.s);
 

@@ -233,18 +233,22 @@ function city(ctx) {
       const yaw = ctx.yaw(s) + (rnd() - 0.5) * 0.12;
       const c = ctx.at(s, lat, 0);
 
-      dark.box(c.x, c.y + h / 2 - 1, c.z, w, h, depth, yaw);
+      /* box() takes sizes in the yawed frame: X runs across the road, Z along
+         it. `w` is the frontage and `depth` is how far back the building goes,
+         so they go in as (depth, height, w) — passing them the other way round
+         gave buildings a lateral half-extent of up to 12 m while the placement
+         had only reserved 5, which put them out in the carriageway. */
+      dark.box(c.x, c.y + h / 2 - 1, c.z, depth, h, w, yaw);
 
-      // lit window field on the road-facing wall
+      // lit window field on the road-facing wall, spanning the frontage
       const face = ctx.at(s, lat - side * (depth / 2 + 0.06), 0);
-      const cs = Math.cos(yaw), sn = Math.sin(yaw);
-      const rx = new THREE.Vector3(cs, 0, -sn).multiplyScalar(w / 2 - 0.4);
+      const along = ctx.forward(s).multiplyScalar(w / 2 - 0.4);
       const y0 = face.y + 0.6, y1 = face.y + h - 1.6;
       win.quad(
-        new THREE.Vector3(face.x - rx.x, y0, face.z - rx.z),
-        new THREE.Vector3(face.x + rx.x, y0, face.z + rx.z),
-        new THREE.Vector3(face.x + rx.x, y1, face.z + rx.z),
-        new THREE.Vector3(face.x - rx.x, y1, face.z - rx.z),
+        new THREE.Vector3(face.x - along.x, y0, face.z - along.z),
+        new THREE.Vector3(face.x + along.x, y0, face.z + along.z),
+        new THREE.Vector3(face.x + along.x, y1, face.z + along.z),
+        new THREE.Vector3(face.x - along.x, y1, face.z - along.z),
         0, 0, Math.max(1, w / 5) | 0, Math.max(1, h / 3.2) | 0
       );
 
