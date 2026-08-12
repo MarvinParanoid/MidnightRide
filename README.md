@@ -194,6 +194,37 @@ change between frames.
 `docs/ride.webp` is the same clip at a quarter of the size and a wider frame —
 worth swapping into the README if everywhere you care about renders WebP.
 
+## Measuring whether anyone rides
+
+A store page counts views and plays, which look identical whether someone rode
+for twenty minutes or closed the tab in ten seconds — and that difference is the
+only thing worth knowing after a launch. So the game can send **one beacon per
+session**, as the tab closes, with counters it already keeps:
+
+- how long the session lasted, and which bucket it falls in
+- how far they rode, and their top speed
+- whether they had been here before (the lifetime odometer already knows)
+- whether a frame ever rendered at all, and the average frame rate — a WebGL
+  game that fails to start is indistinguishable from one nobody liked
+- desktop or touch, quality tier, viewport rounded to the nearest 100 px
+- autopilot share, photo-mode opens, screenshots saved, cameras used, and which
+  of the rare events actually turned up
+
+No cookies, no identifiers, no time zone, nothing per-frame. It is off unless an
+endpoint is given at build time, so a plain `npm run build` ships a game that
+phones nobody:
+
+```bash
+VITE_TELEMETRY_URL=https://example.com/mr npm run build:itch
+VITE_TELEMETRY_MODE=pixel   # for endpoints that want a GET, e.g. GoatCounter
+```
+
+One implementation note worth keeping: the body is JSON but goes out as
+`text/plain`. `application/json` is not a CORS-safelisted content type, so it
+triggers a preflight — and a beacon fired during `pagehide` does not survive the
+round trip. The request dies as an unanswered `OPTIONS` and you get silence
+instead of data. The receiver just parses the body itself.
+
 ## Console handle
 
 `window.__mr` exposes the renderer, scene, road, bike, traffic, audio and the

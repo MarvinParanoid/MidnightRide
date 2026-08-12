@@ -20,6 +20,7 @@ import { EngineSound } from './audio/engine.js';
 import { Music } from './audio/music.js';
 import { clamp, damp, smoothstep } from './geo.js';
 import { assets } from './assets.js';
+import { telemetry } from './telemetry.js';
 
 /* ── renderer ──────────────────────────────────────────────── */
 const canvas = document.getElementById('scene');
@@ -95,6 +96,11 @@ try {
   lifetimeKm = Number(localStorage.getItem(ODO_KEY)) || 0;
 } catch { /* private mode, never mind */ }
 hud.setReturning(lifetimeKm);
+telemetry.set({
+  returning: lifetimeKm > 1,
+  device: isTouchDevice ? 'touch' : 'desktop',
+  quality: quality.name,
+});
 
 function saveOdo() {
   try {
@@ -184,6 +190,7 @@ input.on('KeyF', () => {
   } else {
     road.point(state.s, state.lat, 0, tmpA);
     photo.enter(tmpA, road.poseAt(state.s).h);
+    telemetry.data.photo++;
     state.photo = true;
     hud.photo(true);
     hud.photoBar(true, photo.readout);
@@ -231,6 +238,7 @@ async function begin() {
   if (running) return;
   running = true;
   attract = false;
+  telemetry.started();
   hud.dismiss();
   state.odo = 0;                 // the attract lap isn't yours; don't bank it
   state.camMode = 0;             // hand back the riding camera
@@ -470,6 +478,8 @@ let clockTick = 0;
 let odoTick = 15;
 let clockStr = formatClock();
 let fps = 0;
+let rideTime = 0;
+let autoTime = 0;
 
 function frame() {
   const wall = performance.now() / 1000;
@@ -550,7 +560,20 @@ function frame() {
   composer.render();
 
   /* the drawing buffer is only intact for the rest of this task */
-  if (photo.wantShot && photo.maybeCapture(place)) hud.flashShot();
+  if (photo.wantShot && photo.maybeCapture(place)) { hud.flashShot(); telemetry.data.shots++; }
+
+  /* bookkeeping for the single end-of-session beacon */
+  if (!telemetry.data.ok) telemetry.set({ ok: true });
+  telemetry.data.maxKmh = Math.max(telemetry.data.maxKmh, state.v * 3.6);
+  telemetry.data.km = state.odo / 1000;
+  telemetry.data.fps = fps;
+  telemetry.data.seen = events.seen;
+  if (running) {
+    rideTime += dt;
+    if (state.auto) autoTime += dt;
+    telemetry.data.autoShare = autoTime / Math.max(rideTime, 0.001);
+    if (!telemetry.data.cams.includes(state.camMode)) telemetry.data.cams.push(state.camMode);
+  }
   if (photo.active && !photo.hideUi) hud.photoBar(true, photo.readout);
 
   /* hud */

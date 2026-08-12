@@ -95,6 +95,8 @@ export class Events {
     this.rider = { obj: null, lean: null, active: false, s: 0, lat: 0, speed: 42, next: 180 + r() * 360, life: 0, phase: 0 };
     this.storm = { active: false, until: 0, strikeAt: 0, next: 150 + r() * 300, reflash: -1 };
     this.overlook = { obj: null };
+    /* how many of the rare things this session actually showed anyone */
+    this.seen = { train: 0, rider: 0, plane: 0, planeLow: 0, lightning: 0 };
   }
 
   /* ── lazy construction: nothing exists until it first happens ── */
@@ -224,6 +226,8 @@ export class Events {
         p.from.set(pose.x - 900, pose.y + 320, pose.z - 500);
         p.to.set(pose.x + 900, pose.y + 380, pose.z + 700);
       }
+      this.seen.plane++;
+      if (p.low) this.seen.planeLow++;
       p.strobe.scale.setScalar(p.low ? 16 : 40);
       p.nav.scale.setScalar(p.low ? 11 : 26);
       p.nav.position.x = p.low ? 11 : 26;
@@ -260,6 +264,7 @@ export class Events {
       if (tr.next > 0 || !openCountry || st.remote < 0.2 || st.v < 12) return;
       if (!tr.cars) this.buildTrain();
       tr.active = true;
+      this.seen.train++;
       tr.life = 0;
       tr.company = 0;
       tr.side = this.rnd() < 0.5 ? -1 : 1;
@@ -324,6 +329,7 @@ export class Events {
       if (rd.next > 0 || st.v < 14 || st.biome === BIOME.TUNNEL) return;
       if (!rd.obj) this.buildRider();
       rd.active = true;
+      this.seen.rider++;
       rd.life = 0;
       rd.company = 0;
       rd.phase = this.rnd() * 6.28;
@@ -484,6 +490,7 @@ export class Events {
   }
 
   strike(now) {
+    this.seen.lightning++;
     this.flash = 1;
     this.storm.reflash = now + 0.07 + this.rnd() * 0.1;   // real lightning flickers
     this.thunder.push(now + 1.4 + this.rnd() * 5.5);
