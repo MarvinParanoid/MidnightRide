@@ -17,7 +17,9 @@ const OUT = 'dist-itch';
 const ZIP = 'midnight-ride-itch.zip';
 
 process.env.MR_TARGET = 'itch';
-rmSync(OUT, { recursive: true, force: true });
+/* Vite empties the directory itself. Deleting it outright yanks the ground out
+   from under any shell sitting in it — which is exactly where you end up after
+   serving the build for a stream. */
 rmSync(ZIP, { force: true });
 
 await build();
