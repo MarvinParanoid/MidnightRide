@@ -12,6 +12,7 @@
  */
 import {
   makeArp, makeBass, makeDrums, makeLead, euclid, pickSection, SECTIONS, STATIONS, chordNotes,
+  signature, varyArp, varyBass, varyDrums,
 } from '../../src/audio/stations.js';
 
 const N = 4000;
@@ -95,6 +96,60 @@ export async function run() {
   const progs = ids.reduce((a, k) => a + STATIONS[k].progressions.length, 0);
   push('stations have distinct tempo ranges', bpms.size === ids.length, [...bpms].join(' '));
   push('there are progressions to draw from', progs >= 15, `${progs} across ${ids.length} stations`);
+
+  /* The station has to be recognisable, or an hour of it is an hour of nothing
+     in particular. Its figure is fixed, and a variation has to stay near it. */
+  let unstable = 0;
+  for (const id of ids) {
+    if (JSON.stringify(signature(id)) !== JSON.stringify(signature(id))) unstable++;
+  }
+  push('a station keeps the same figure', unstable === 0, `${ids.length} stations`);
+  push('stations do not share a figure',
+    new Set(ids.map((id) => JSON.stringify(signature(id).arp))).size === ids.length,
+    `${ids.length} distinct`);
+
+  let moved = 0, cells = 0, vDupes = 0, vPairs = 0, lenBad = 0;
+  for (let i = 0; i < N; i++) {
+    const sig = signature(ids[i % ids.length]);
+    const v = varyArp(sig.arp);
+    if (v.length !== sig.arp.length) lenBad++;
+    for (let k = 0; k < v.length; k++) {
+      cells++;
+      const a = sig.arp[k], b = v[k];
+      if ((!a) !== (!b) || (a && b && a.rung !== b.rung)) moved++;
+    }
+    for (const [type, li] of Object.entries(CHORDS)) {
+      const notes = chordNotes(48, type);
+      const cs = v.filter(Boolean);
+      for (let k = 1; k < cs.length; k++) {
+        const f = (c) => notes[c.rung % li] + 12 * Math.floor(c.rung / li);
+        vPairs++;
+        if (f(cs[k]) === f(cs[k - 1])) vDupes++;
+      }
+    }
+  }
+  const frac = moved / cells;
+  push('a variation is still the same tune', frac > 0.15 && frac < 0.5, `${(100 * frac).toFixed(1)}% of cells move`);
+  push('a variation keeps the length', lenBad === 0, `${lenBad} bad`);
+  /* The one that already shipped once: moving a rung without looking at its
+     neighbour puts the same pitch on two cells running. It came back at 17%. */
+  push('a variation never repeats a pitch back to back', vDupes === 0, `${vDupes} of ${vPairs} pairs`);
+
+  const bassMoved = Array.from({ length: N }, (_, i) => {
+    const sig = signature(ids[i % ids.length]);
+    const v = varyBass(sig.bass, Math.random);
+    return v.notes.filter((n, k) => n.off !== sig.bass.notes[k].off).length / v.notes.length;
+  });
+  const bm = bassMoved.reduce((a, x) => a + x, 0) / N;
+  push('the bass varies without moving its hits', bm > 0.02 && bm < 0.45, `${(100 * bm).toFixed(1)}% of notes recoloured`);
+
+  let kickKept = 0;
+  for (let i = 0; i < N; i++) {
+    const sig = signature(ids[i % ids.length]);
+    const v = varyDrums(sig.drums, 'four');
+    if (JSON.stringify(v.kick) === JSON.stringify(sig.drums.kick)) kickKept++;
+  }
+  push('a drum variation keeps the kick', kickKept === N, `${kickKept}/${N}`);
 
   return r;
 }

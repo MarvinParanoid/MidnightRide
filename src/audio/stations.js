@@ -6,6 +6,8 @@
  * the game is also a channel. Chords are written as semitone offsets from
  * whatever the current key is, so the whole thing transposes for free.
  */
+import { mulberry32 } from '../geo.js';
+
 const CH = {
   min: [0, 3, 7],
   maj: [0, 4, 7],
@@ -315,4 +317,86 @@ const sectionDeck = new Deck(SECTION_PILE);
 
 export function pickSection() {
   return sectionDeck.draw();
+}
+
+/* ────────────────────────────────────────────────────────────
+   Station signatures
+
+   The generators above give a station endless material, and endless material
+   with nothing recurring is the one thing worse than a four-bar loop: there is
+   nothing to recognise. The earliest version of this soundtrack had one
+   progression, one arpeggio and one drum pattern, and it was memorable for
+   exactly that reason — you could hum it.
+
+   So each station keeps a fixed figure of its own, seeded from its name so it
+   is the same figure every session, the way a real station has an ident. Most
+   sections restate it; the rest play something derived from it. Variety now
+   happens *around* a hook instead of instead of one.
+   ──────────────────────────────────────────────────────────── */
+
+const hash = (str) => {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+  return h >>> 0;
+};
+
+const signatures = new Map();
+
+/** The figure this station is known by. Same one every time. */
+export function signature(id) {
+  let sig = signatures.get(id);
+  if (!sig) {
+    const st = STATIONS[id];
+    const rnd = mulberry32(hash(id));
+    sig = {
+      arp: makeArp(rnd),
+      bass: makeBass(rnd),
+      drums: makeDrums(st.drums, rnd),
+      progression: st.progressions[(rnd() * st.progressions.length) | 0],
+    };
+    signatures.set(id, sig);
+  }
+  return sig;
+}
+
+/**
+ * A variation, not a replacement. The rhythm of the figure survives; a few of
+ * its notes move by a step, a few rests open or close. Far enough to be a
+ * different bar, near enough that you can still hear which tune it is.
+ */
+export function varyArp(pat, rnd = Math.random) {
+  /* Whatever this does, it may not put the same pitch on two sounding cells in
+     a row — that is the stutter that made the radio sound broken, and moving a
+     rung without looking at its neighbour brought it straight back at 17%.
+     Rungs 0..3 map one-to-one onto pitches for every chord size in use, so
+     keeping the rung different from the last one sounded is enough. */
+  let prev = null;
+  return pat.map((c, i) => {
+    const emit = (rung, vel) => {
+      let r = rung % 4;
+      if (r === prev) r = (r + 1 + ((rnd() * 3) | 0)) % 4;
+      prev = r;
+      return { rung: r, vel };
+    };
+    if (!c) return rnd() < 0.22 ? emit(i % 4, 0.55 + rnd() * 0.2) : null;
+    if (rnd() < 0.16) return null;                       // open a rest instead
+    if (rnd() < 0.24) return emit(c.rung + (rnd() < 0.5 ? 1 : 3), c.vel);
+    return emit(c.rung, c.vel);
+  });
+}
+
+/** Same hits, different colour: the octaves and fifths move, the rhythm does not. */
+export function varyBass(fig, rnd = Math.random) {
+  return {
+    bars: fig.bars,
+    notes: fig.notes.map((n) => (n.s % 16 === 0 || rnd() > 0.3
+      ? n
+      : { ...n, off: rnd() < 0.5 ? 7 : 12 })),
+  };
+}
+
+/** The kick stays where it was; the hats and the odd extra snare move. */
+export function varyDrums(d, kind, rnd = Math.random) {
+  const fresh = makeDrums(kind, rnd);
+  return { bars: d.bars, kick: d.kick, snare: d.snare, hat: fresh.bars === d.bars ? fresh.hat : d.hat };
 }
