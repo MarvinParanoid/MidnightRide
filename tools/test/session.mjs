@@ -148,7 +148,17 @@ export async function steps(page, n, batch = 60) {
   }
 }
 
-/** Freeze the simulation so repeated renders of the same instant are identical. */
+/**
+ * Freeze the simulation so repeated renders of the same instant are identical.
+ *
+ * The frame right after freezing is not like the ones after it — the grade
+ * shader's time uniform, the beat decay and the environment-map counter all
+ * settle over one more step — so it is rendered and thrown away. Comparing a
+ * variant against that first frame reads as an 8-to-10 unit change in a region
+ * that nothing touched, which sent three separate investigations down the wrong
+ * road in one afternoon.
+ */
 export async function freeze(page) {
   await page.evaluate(() => { window.__mr.record.dt = 0; });
+  await steps(page, 2);
 }
