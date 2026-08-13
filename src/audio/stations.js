@@ -18,6 +18,70 @@ const CH = {
 
 export const chordNotes = (root, type) => CH[type].map((i) => root + i);
 
+/**
+ * Euclidean rhythm — Bjorklund's algorithm, in the closed form.
+ *
+ * Spread `pulses` hits as evenly as possible over `steps` cells. This is not a
+ * curiosity: E(3,8) is the tresillo, E(5,8) the cinquillo, E(2,5) the habanera
+ * cell. Two integers give a whole family of rhythms that already sound like
+ * rhythms, which a list of hand-written patterns never covers.
+ */
+export function euclid(pulses, steps, rotate = 0) {
+  const out = [];
+  if (pulses <= 0 || steps <= 0) return out;
+  for (let i = 0; i < steps; i++) {
+    if ((i * pulses) % steps < pulses) out.push((i + rotate) % steps);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * Draw without replacement.
+ *
+ * Picking from four progressions with Math.random repeats the one you just
+ * heard a quarter of the time, and can leave one of them unheard for minutes.
+ * A shuffled pile plays all of them before any comes round again, and refuses
+ * to start a new pile with the card it just finished on.
+ */
+export class Deck {
+  constructor(items, rnd = Math.random) {
+    this.items = items;
+    this.rnd = rnd;
+    this.pile = [];
+    this.last = null;
+  }
+
+  draw() {
+    if (!this.pile.length) this.refill();
+    this.last = this.pile.pop();
+    return this.last;
+  }
+
+  refill() {
+    const p = this.items.slice();
+    for (let i = p.length - 1; i > 0; i--) {
+      const j = (this.rnd() * (i + 1)) | 0;
+      [p[i], p[j]] = [p[j], p[i]];
+    }
+    /* A weighted pile holds duplicates — thirteen 'full' cards in twenty-five —
+       so a plain shuffle leaves them clumped and repeats *more* than a dice roll
+       does. Measured: 32% back-to-back against the dice's 25%. Push adjacent
+       duplicates apart before dealing. */
+    for (let i = 0; i + 1 < p.length; i++) {
+      if (p[i] !== p[i + 1]) continue;
+      for (let k = 0; k < 8; k++) {
+        const j = 1 + ((this.rnd() * (p.length - 1)) | 0);
+        if (p[j] === p[i] || p[j] === p[j - 1] || (j + 1 < p.length && p[j] === p[j + 1])) continue;
+        [p[i + 1], p[j]] = [p[j], p[i + 1]];
+        break;
+      }
+    }
+    // the top of the pile is drawn last, so guard the *end* against the last card
+    if (p.length > 1 && p[p.length - 1] === this.last) [p[0], p[p.length - 1]] = [p[p.length - 1], p[0]];
+    this.pile = p;
+  }
+}
+
 /* No fixed interval pool. A list like [0,3,5,7,10,...] contains the minor
    third, and half the chords in these progressions are major — a minor third
    over a major third is not colour, it is a wrong note, and picking it at
@@ -31,21 +95,32 @@ export const chordNotes = (root, type) => CH[type].map((i) => root + i);
  * out over an hour.
  */
 export function makeArp(rnd = Math.random) {
-  /* Length has to divide into the bar. A twelve-cell figure over eight cells
-     per bar repeats every bar and a half, so its accents drift against the
-     chord changes and the drums — which is heard as something being subtly
-     wrong rather than as a rhythm. */
-  const len = rnd() < 0.5 ? 8 : 16;
+  /* The length must come out to a whole number of bars at *either* arp rate —
+     the rate halves at speed, so only multiples of eight cells stay put. A
+     twelve-cell figure repeats every bar and a half and its accents drift
+     against the chords, which is heard as something being wrong.
+     Within that rule the span can still be three or five bars instead of one,
+     which is what stops the figure lining up with everything else. */
+  const len = 8 * [1, 1, 2, 2, 3, 5][(rnd() * 6) | 0];
   const pat = [];
-  let deg = 0;
+  /* A rung on the chord, not a scale degree — the player turns it into a pitch
+     by climbing past the top of the chord into the next octave, the way an
+     arpeggiator does. The old version walked 0..3 and the player took it modulo
+     the chord size, so on any three-note chord a step from 3 to 0 was a step
+     onto the same pitch: measured, fourteen per cent of neighbouring notes came
+     out identical, heard as a note stuttering rather than a figure moving.
+     Four rungs is injective for every chord size in use, so it cannot happen.
+     Five would be too — and would reach the ninth of a min9 — but it sends the
+     figure an octave up two rungs in five on a triad, which measured as a median
+     of D5 and a p90 near a kilohertz. That is the register that reads as shrill.
+     The ninth is still in the pad; the arp does without it. */
+  let rung = 0;
   for (let i = 0; i < len; i++) {
     if (rnd() < 0.16 || (i % 4 === 0 && rnd() < 0.12)) { pat.push(null); continue; }
-    // spread across the chord instead of circling back onto the root
-    deg += rnd() < 0.5 ? 1 : (rnd() < 0.5 ? 2 : -1);
-    deg = ((deg % 4) + 4) % 4;
+    rung += rnd() < 0.5 ? 1 : (rnd() < 0.5 ? 2 : -1);
+    rung = ((rung % 4) + 4) % 4;
     pat.push({
-      deg,
-      oct: rnd() < 0.14 ? 12 : 0,
+      rung,
       // every note at one volume is a machine; the beat gets the weight
       vel: i % 4 === 0 ? 0.95 : 0.5 + rnd() * 0.28,
     });
@@ -77,24 +152,23 @@ export function makeLead(rnd = Math.random) {
  * the one whose loop you learn first.
  */
 export function makeBass(rnd = Math.random) {
-  const shapes = [
-    [0, 6, 8, 14],
-    [0, 8],
-    [0, 3, 8, 11],
-    [0, 6, 8, 12, 14],
-    [0, 4, 8, 12],
-    [0, 7, 8, 15],
-    [0, 8, 10, 14],
-    [0, 6, 10],
-  ];
-  const at = shapes[(rnd() * shapes.length) | 0];
-  return at.map((s) => ({
-    s,
-    // the fifth or the octave now and then, so a four-bar loop keeps moving;
-    // never on the downbeat, which is what tells you what the chord is
-    off: s === 0 ? 0 : rnd() < 0.18 ? 7 : rnd() < 0.12 ? 12 : 0,
-    dur: s === 0 ? 0.5 : 0.28,
-  }));
+  /* A whole number of bars, and deliberately often not one — a one-bar bass
+     figure heard eight times per section is the loop you learn first. */
+  const bars = [1, 2, 3, 4][(rnd() * 4) | 0];
+  const steps = 16 * bars;
+  const pulses = Math.max(2, Math.round(steps * (0.14 + rnd() * 0.16)));
+  const at = euclid(pulses, steps, 0);
+  if (!at.includes(0)) at.unshift(0);
+  return {
+    bars,
+    notes: at.map((st) => ({
+      s: st,
+      // the fifth or the octave now and then, so a long figure keeps moving;
+      // never on a downbeat, which is what tells you what the chord is
+      off: st % 16 === 0 ? 0 : rnd() < 0.18 ? 7 : rnd() < 0.12 ? 12 : 0,
+      dur: st % 16 === 0 ? 0.5 : 0.28,
+    })),
+  };
 }
 
 /**
@@ -103,27 +177,36 @@ export function makeBass(rnd = Math.random) {
  */
 export function makeDrums(kind, rnd = Math.random) {
   const tight = kind === 'tight';
+  /* One to three bars. The snare is laid down per bar, so the backbeat lands
+     where it always did; it is the kick and the hats that stop repeating every
+     four seconds. Spans that are coprime with the bass figure's are the point:
+     two against three takes six bars to come back round. */
+  const bars = [1, 2, 2, 3][(rnd() * 4) | 0];
+  const steps = 16 * bars;
 
   const kick = new Set([0]);                       // the downbeat is not negotiable
-  kick.add(tight && rnd() < 0.35 ? 10 : 8);
-  if (rnd() < (tight ? 0.55 : 0.3)) kick.add(rnd() < 0.5 ? 3 : 6);
-  if (tight && rnd() < 0.3) kick.add(11);
-
-  const snare = new Set([4, 12]);                  // backbeat stays put
-  if (tight) snare.add(14);
-  if (rnd() < 0.25) snare.add(rnd() < 0.5 ? 7 : 15);
-
-  /* eighths, eighths opening into sixteenths, or a broken figure */
-  const mode = rnd();
-  const hat = [];
-  for (let s = 0; s < 16; s++) {
-    const on = mode < 0.45 ? s % 2 === 0
-      : mode < 0.75 ? (s % 2 === 0 || s >= 8)
-        : s % 4 !== 1;
-    if (on) hat.push(s);
+  for (let b = 0; b < bars; b++) {
+    const o = b * 16;
+    kick.add(o + (tight && rnd() < 0.35 ? 10 : 8));
+    if (rnd() < (tight ? 0.55 : 0.3)) kick.add(o + (rnd() < 0.5 ? 3 : 6));
+    if (tight && rnd() < 0.3) kick.add(o + 11);
   }
 
-  return { kick: [...kick], snare: [...snare], hat };
+  const snare = new Set();                         // backbeat stays put
+  for (let b = 0; b < bars; b++) {
+    const o = b * 16;
+    snare.add(o + 4).add(o + 12);
+    if (tight) snare.add(o + 14);
+    if (rnd() < 0.25) snare.add(o + (rnd() < 0.5 ? 7 : 15));
+  }
+
+  /* Hats are where a Euclidean spread earns its keep: straight eighths, or an
+     uneven distribution that still resolves onto the bar. */
+  const hat = rnd() < 0.45
+    ? Array.from({ length: steps / 2 }, (_, i) => i * 2)
+    : euclid(Math.round(steps * (0.45 + rnd() * 0.3)), steps, 0);
+
+  return { bars, kick: [...kick], snare: [...snare], hat };
 }
 
 /** Same chord, different spacing — rotate some notes up an octave. */
@@ -224,11 +307,12 @@ export const SECTIONS = [
   { name: 'drive', weight: 0.12, drums: 1, arp: 1, lead: 1, pad: 0.55 },
 ];
 
-export function pickSection(rnd = Math.random) {
-  let r = rnd();
-  for (const s of SECTIONS) {
-    r -= s.weight;
-    if (r <= 0) return s;
-  }
-  return SECTIONS[0];
+/* The weights as a pile of cards rather than a dice roll: the same long-run
+   distribution, but 'full' cannot come up five times running and 'swell'
+   cannot go missing for ten minutes. */
+const SECTION_PILE = SECTIONS.flatMap((x) => Array(Math.round(x.weight * 25)).fill(x));
+const sectionDeck = new Deck(SECTION_PILE);
+
+export function pickSection() {
+  return sectionDeck.draw();
 }

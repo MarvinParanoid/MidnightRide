@@ -1,7 +1,7 @@
 import { mtof } from './core.js';
 import { clamp, smoothstep } from '../geo.js';
 import {
-  STATIONS, chordNotes, stationFor, pickSection, makeArp, makeLead, makeBass, makeDrums, voice,
+  STATIONS, chordNotes, stationFor, pickSection, makeArp, makeLead, makeBass, makeDrums, voice, Deck,
 } from './stations.js';
 
 const KEYS = [45, 43, 47, 40, 50];        // A, G, B, E, D — comfortable roots
@@ -63,6 +63,10 @@ export class Music {
     this.leadPhrase = makeLead();
     this.bassFigure = makeBass();
     this.drumPattern = makeDrums(this.station.drums);
+    /* Multi-bar figures are counted from where they were dealt, not from the
+       absolute step, or a three-bar bass starts halfway through itself. */
+    this.patternOrigin = 0;
+    this.progDeck = new Deck(this.station.progressions);
 
     this.bpm = 88;
     this.step = 0;
@@ -107,9 +111,8 @@ export class Music {
   changeStation(id, at) {
     this.stationId = id;
     this.station = STATIONS[id];
-    this.progression = this.station.progressions[
-      (Math.random() * this.station.progressions.length) | 0
-    ];
+    this.progDeck = new Deck(this.station.progressions);
+    this.progression = this.progDeck.draw();
     // a new station is a new band, so it does not inherit the last one's kit
     this.drumPattern = makeDrums(this.station.drums);
     this.bassFigure = makeBass();
@@ -214,10 +217,9 @@ export class Music {
         this.arpPattern = makeArp();          // a new figure every eight bars
         this.bassFigure = makeBass();
         this.drumPattern = makeDrums(st.drums);
+        this.patternOrigin = step;
         if (Math.random() < 0.5) this.leadPhrase = makeLead();
-        if (Math.random() < 0.4) {
-          this.progression = st.progressions[(Math.random() * st.progressions.length) | 0];
-        }
+        if (Math.random() < 0.4) this.progression = this.progDeck.draw();
       }
       if (this.sinceKey > TRANSPOSE_EVERY && bar % 8 === 0) {
         this.sinceKey = 0;
@@ -232,6 +234,9 @@ export class Music {
 
     if (s % 4 === 0) this.beats.push(t);
 
+    /* position inside a figure that may be longer than a bar */
+    const pos = (bars) => (((step - this.patternOrigin) % (bars * 16)) + bars * 16) % (bars * 16);
+
     if (s === 0 && bar % 2 === 0) this.pad(voice(notes), t, (60 / this.bpm) * 8);
 
     // never faster than eighths: sixteenths for an hour is relentless
@@ -239,26 +244,31 @@ export class Music {
     if (this.section.arp && s % rate === 0) {
       const cell = this.arpPattern[((step / rate) | 0) % this.arpPattern.length];
       if (cell) {
-        const n = notes[cell.deg % notes.length] + st.arpOct + cell.oct;
+        // climb into the next octave past the top of the chord instead of
+        // folding back onto a note that is already sounding
+        const li = notes.length;
+        const n = notes[cell.rung % li] + 12 * Math.floor(cell.rung / li) + st.arpOct;
         this.pluck(n, t, 0.26 + Math.random() * 0.06, cell.vel);
       }
     }
 
     if (st.drums !== 'none' && this.section.drums) {
       const d = this.drumPattern;
+      const dp = pos(d.bars);                   // where we are inside the figure
       const fill = bar % 8 === 7;               // last bar of the section
       // the pattern is the section's; the extra weight on 2 and 4 is the speed
-      if (d.kick.includes(s) || (e > 0.55 && (s === 4 || s === 12))) {
+      if (d.kick.includes(dp) || (e > 0.55 && (s === 4 || s === 12))) {
         if (!(fill && s === 8 && Math.random() < 0.5)) this.kick(t);
       }
-      if (d.snare.includes(s)) this.snare(t);
+      if (d.snare.includes(dp)) this.snare(t);
       // a fill rolls out of the section instead of the pattern simply repeating
       if (fill && s >= 12 && s % 2 === 0 && Math.random() < 0.7) this.snare(t + this.stepDur * 0.5);
-      if (st.hats && d.hat.includes(s)) this.hat(t, s % 4 === 0 ? 0.5 : 0.26 + Math.random() * 0.16);
+      if (st.hats && d.hat.includes(dp)) this.hat(t, s % 4 === 0 ? 0.5 : 0.26 + Math.random() * 0.16);
       if (st.hats && e > 0.6 && s === 14) this.hat(t, 0.6, true);
     }
 
-    const bn = this.bassFigure.find((x) => x.s === s);
+    const bp = pos(this.bassFigure.bars);
+    const bn = this.bassFigure.notes.find((x) => x.s === bp);
     if (bn) this.bass(root - 12 + bn.off, t, bn.dur);
 
     if (s === 0 && e > 0.55 && st.lead && this.section.lead) {
@@ -308,14 +318,28 @@ export class Music {
     const o = core.ctx.createOscillator();
     o.type = 'sawtooth';
     o.frequency.value = mtof(note);
-    const lp = core.filter('lowpass', 3200, 2.2);
+    /* The cutoff has to follow the note. Parked at 2.6 kHz with a Q of 2.2 it
+       put a resonant peak in the band the ear is most sensitive to and left it
+       there for every note, so the higher the note the more of it sat right in
+       that peak — which is most of what "shrill" was. Tracking the fundamental
+       gives every note the same shape instead of the same emphasis. */
+    const f0 = mtof(note);
+    /* The multiplier has to be small enough that the clamp does not swallow it.
+       At 5.5x the ceiling caught every note above 470 Hz, which is most of what
+       the arp plays, so the "tracking" filter sat at a fixed 2.6 kHz exactly as
+       before and changed nothing. At 3.2x a note at C5 opens to 1.7 kHz and its
+       fourth harmonic — the one that lands in the band the ear is sharpest in —
+       is gone, while a low note still opens wide enough to have an edge. */
+    const open = clamp(f0 * 3.2, 700, 2200);
+    const close = clamp(f0 * 1.4, 220, 800);
+    const lp = core.filter('lowpass', open, 1.3);
     const g = core.gain(0);
     o.connect(lp);
     lp.connect(g);
     g.connect(this.layers.arp);
 
-    lp.frequency.setValueAtTime(2600, t);
-    lp.frequency.exponentialRampToValueAtTime(520, t + dur);
+    lp.frequency.setValueAtTime(open, t);
+    lp.frequency.exponentialRampToValueAtTime(close, t + dur);
     g.gain.setValueAtTime(0.0001, t);
     /* 8 ms was a click, and a click repeated on every eighth note for an hour
        is what "harsh" actually sounds like — the notes were never the problem. */
