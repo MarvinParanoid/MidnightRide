@@ -38,6 +38,28 @@ function glowTexture() {
   return texture(c);
 }
 
+/** A soft dot for point sprites, deliberately without mipmaps.
+    A GL point that covers a handful of pixels samples a coarse mip level, and
+    a coarse mip of a radial gradient has averaged out to a flat disc of alpha —
+    so the point stops fading towards its own edge and draws as a square. The
+    same failure put a grey square on the verge next to a street lamp. Points
+    are small by nature, so there is nothing for mipmaps to do here anyway. */
+function dotTexture() {
+  const [c, x] = canvas(64, 64);
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0.0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.2, 'rgba(255,255,255,0.4)');
+  g.addColorStop(0.55, 'rgba(255,255,255,0.08)');
+  g.addColorStop(1.0, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 64, 64);
+  const t = texture(c);
+  t.generateMipmaps = false;
+  t.minFilter = THREE.LinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  return t;
+}
+
 /** A vertical smear: bright at the top, dissolving downward. Wet-asphalt reflection. */
 function streakTexture() {
   const [c, x] = canvas(64, 256);
@@ -132,6 +154,7 @@ export function assets() {
   if (cache) return cache;
 
   const glow = glowTexture();
+  const dot = dotTexture();
   const streak = streakTexture();
   const band = bandTexture();
   const wetness = wetnessTexture();
@@ -151,7 +174,7 @@ export function assets() {
     });
 
   cache = {
-    tex: { glow, streak, band, wetness, windows },
+    tex: { glow, dot, streak, band, wetness, windows },
 
     /* surfaces */
     asphalt: new THREE.MeshStandardMaterial({
@@ -204,7 +227,7 @@ export function assets() {
     additive,
     /* Not a THREE.Sprite any more — a handle the GlowField renders in one
        instanced draw. Same properties, so nothing at the call sites changed. */
-    glowField: new GlowField(glow),
+    glowField: new GlowField(),
     glowSprite: (color, scale, opacity = 1) => new Glow(color, scale, opacity),
   };
 

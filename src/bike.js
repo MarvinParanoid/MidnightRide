@@ -156,7 +156,7 @@ export class Bike {
     /* Lifted off the road and pulled in close. Sitting at tarmac level two
        metres ahead it stopped reading as bounce and became a spotlight pointed
        at the ground — obvious once the road itself got darker. */
-    this.bounce = new THREE.PointLight(0xffc98a, 1.3, 5, 1.9);
+    this.bounce = new THREE.PointLight(0xffc98a, 0.5, 3.2, 2.0);
     this.bounce.position.set(0, 0.52, -1.15);
     this.lean.add(this.bounce);
 
@@ -199,16 +199,31 @@ export class Bike {
     this.lean.add(this.tailGlow);
 
     /* ── road spray thrown up by the rear wheel ─────────── */
-    const n = 160;
+    /* Fine mist, not marbles and not confetti. Two things had to change: at
+       half a metre across, a droplet three metres behind the camera covered
+       tens of pixels and a hundred and sixty of them fused into one white-hot
+       rope (measured: 56 x 146 px peaking at 215/255). Shrinking them then left
+       four hundred identical crisp circles winking in and out — every droplet
+       the same size, the same brightness, and gone the instant its life ran
+       out. Density plus a per-droplet brightness that decays with age is what
+       makes it read as water rather than as dots. */
+    const n = 1100;
     const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
     this.sprayLife = new Float32Array(n);
-    for (let i = 0; i < n; i++) this.sprayLife[i] = Math.random();
+    this.sprayTone = new Float32Array(n);        // how bright this droplet ever gets
+    for (let i = 0; i < n; i++) {
+      this.sprayLife[i] = Math.random();
+      this.sprayTone[i] = 0.35 + Math.random() * 0.65;
+    }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     this.sprayMat = new THREE.PointsMaterial({
-      map: a.tex.glow,
+      map: a.tex.dot,          // no mipmaps: a mipped point sprite renders square
       color: 0x7d90b0,
-      size: 0.5,
+      size: 0.26,
+      vertexColors: true,          // per-droplet brightness, and a fade with age
       transparent: true,
       opacity: 0,
       blending: THREE.AdditiveBlending,
@@ -316,27 +331,37 @@ export class Bike {
 
   updateSpray(dt, speed, rain) {
     const amount = clamp(speed / 30, 0, 1) * rain;
-    this.sprayMat.opacity = amount * 0.5;
+    this.sprayMat.opacity = amount * 0.11;
     if (amount <= 0.01) return;
     const p = this.spray.geometry.attributes.position;
+    const c = this.spray.geometry.attributes.color;
     const arr = p.array;
+    const carr = c.array;
     for (let i = 0; i < this.sprayLife.length; i++) {
       this.sprayLife[i] -= dt * (0.7 + speed * 0.02);
       const i3 = i * 3;
       if (this.sprayLife[i] <= 0) {
         this.sprayLife[i] = 1;
-        arr[i3] = (Math.random() - 0.5) * 0.25;
+        arr[i3] = (Math.random() - 0.5) * 0.45;
         arr[i3 + 1] = 0.06;
-        arr[i3 + 2] = 1.0;
+        // stagger the birth along the trail, or the whole cloud is reborn
+        // together and the plume pulses instead of hanging there
+        arr[i3 + 2] = 1.0 + Math.random() * 0.8;
       } else {
         const t = 1 - this.sprayLife[i];
-        arr[i3] += (Math.random() - 0.5) * 0.9 * dt;
+        // the plume widens as it falls behind rather than staying a rope
+        arr[i3] += (Math.random() - 0.5) * (1.1 + t * 2.6) * dt;
         arr[i3 + 1] = 0.06 + t * t * 1.3;
         arr[i3 + 2] += (2 + speed * 0.28) * dt;
       }
+      // thins out as it drifts back, so nothing ever blinks out mid-air
+      const f = this.sprayTone[i] * this.sprayLife[i] * this.sprayLife[i];
+      carr[i3] = f;
+      carr[i3 + 1] = f;
+      carr[i3 + 2] = f;
     }
     p.needsUpdate = true;
-    this.spray.geometry.computeBoundingSphere();
+    c.needsUpdate = true;
   }
 
   /** Place the bike on the centreline at a lateral offset. */

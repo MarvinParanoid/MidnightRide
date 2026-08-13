@@ -26,8 +26,8 @@ const DECAL_VERT = /* glsl */ `
   }
 `;
 const DECAL_FRAG = /* glsl */ `
-  uniform sampler2D map;
   uniform vec3 color;
+  uniform float radial;        // 1 for a pool, 0 for a band down the road
   varying vec2 vUv;
   varying vec3 vEye;
   varying vec3 vUp;
@@ -38,14 +38,24 @@ const DECAL_FRAG = /* glsl */ `
        fragments that they stop stacking into a bar. */
     float graze = abs(dot(normalize(vEye), vUp));
     float fade = 0.15 + 0.85 * pow(graze, 0.4);
-    vec4 t = texture2D(map, vUv);
-    gl_FragColor = vec4(color * t.rgb * t.a * fade, 1.0);
+
+    /* The falloff is computed, not sampled.
+       It used to come from a texture, and a flat quad seen at a grazing angle
+       has such a lopsided UV derivative that the GPU drops to a coarse mip —
+       where a radial gradient has averaged out to a flat grey. The quad then
+       stopped fading at its own border and drew its outline: a soft grey
+       square sitting on the verge next to a lamp. Arithmetic has no mips. */
+    vec2 e = (vUv - 0.5) * 2.0;
+    float d = mix(abs(e.x), length(e), radial);
+    float shape = pow(max(0.0, 1.0 - d), mix(2.2, 2.6, radial));
+
+    gl_FragColor = vec4(color * shape * fade, 1.0);
   }
 `;
 
-function decalMat(hex, intensity, map) {
+function decalMat(hex, intensity, radial) {
   return new THREE.ShaderMaterial({
-    uniforms: { map: { value: map }, color: { value: neon(hex, intensity) } },
+    uniforms: { color: { value: neon(hex, intensity) }, radial: { value: radial } },
     vertexShader: DECAL_VERT,
     fragmentShader: DECAL_FRAG,
     transparent: true,
@@ -81,11 +91,14 @@ function emissiveMat(hex, intensity, map = null, mapKey = '') {
 }
 
 const decalCache = new Map();
-function decalCached(hex, intensity, map, mapKey) {
+/* The shape has to be part of the key, or a pool and a band of the same colour
+   and strength silently share one material and whichever was built first
+   decides the shape of both. */
+function decalCached(hex, intensity, radial, mapKey) {
   const key = `${hex}|${intensity}|${mapKey}`;
   let m = decalCache.get(key);
   if (!m) {
-    m = decalMat(hex, intensity, map);
+    m = decalMat(hex, intensity, radial);
     decalCache.set(key, m);
   }
   return m;
@@ -132,12 +145,12 @@ export class ChunkCtx {
 
   /** A light band smeared down the wet road — fades away from its centreline. */
   smear(hex, intensity = 1) {
-    return this.get(`s${hex}_${intensity}`, decalCached(hex, intensity, this.a.tex.band, 'band'));
+    return this.get(`s${hex}_${intensity}`, decalCached(hex, intensity, 0, 'band'));
   }
 
   /** A soft pool of reflected light — fades in every direction. */
   pool(hex, intensity = 1) {
-    return this.get(`p${hex}_${intensity}`, decalCached(hex, intensity, this.a.tex.glow, 'glow'));
+    return this.get(`p${hex}_${intensity}`, decalCached(hex, intensity, 1, 'glow'));
   }
 
   pose(s) {

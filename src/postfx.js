@@ -91,6 +91,11 @@ export function createComposer(renderer, scene, camera, quality = {}) {
   );
   composer.addPass(new RenderPass(scene, camera));
 
+  /* Leave the threshold alone. Raising it from 0.42 to 0.70 to shrink the halo
+     under the bike was measured and it was wrong on every axis: bright pixels
+     18938 against 878, frame-to-frame flicker 29.6% against 19.5%, and the halo
+     itself twenty times worse. The radius argument here is decorative anyway —
+     applyBloomScale overwrites it on the next line. */
   const bloom = new UnrealBloomPass(size.clone().multiplyScalar(bloomScale), 0.95, 0.72, 0.42);
   composer.addPass(bloom);
   applyBloomScale(bloom, size, bloomScale);   // after addPass: it re-sizes passes

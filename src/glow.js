@@ -47,22 +47,28 @@ const VERT = /* glsl */ `
 `;
 
 const FRAG = /* glsl */ `
-  uniform sampler2D map;
   varying vec2 vUv;
   varying vec3 vColor;
   void main() {
-    float a = texture2D(map, vUv).a;
-    /* Premultiplied, so additive blending is a straight ONE/ONE add and the
-       result matches what SpriteMaterial produced exactly. */
+    /* Computed, not sampled. A mipmapped radial gradient flattens to a solid
+       disc of alpha at coarse levels, so a glow that is small on screen stops
+       fading towards its edge and draws as a translucent square. Same defect
+       that put a square on the verge and turned road spray into confetti.
+       Exponent fitted against the texture it replaces by integrated energy,
+       not by eye: 2.6 came out 15% dim in a same-position comparison, 2.4
+       matches it to within 2%. */
+    float r = length(vUv - 0.5) * 2.0;
+    float a = pow(max(0.0, 1.0 - r), 2.4);
+    /* Premultiplied, so additive blending is a straight ONE/ONE add. */
     gl_FragColor = vec4(vColor * a, a);
   }
 `;
 
 export class GlowField {
-  constructor(map, max = 1024) {
+  constructor(max = 1024) {
     this.max = max;
     const material = new THREE.ShaderMaterial({
-      uniforms: { map: { value: map } },
+      uniforms: {},
       vertexShader: VERT,
       fragmentShader: FRAG,
       transparent: true,
