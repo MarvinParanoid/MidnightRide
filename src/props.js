@@ -148,6 +148,12 @@ export class ChunkCtx {
     return this.get(`s${hex}_${intensity}`, decalCached(hex, intensity, 0, 'band'));
   }
 
+  /** Sign characters, additive, in a given colour. */
+  glyph(hex, intensity = 3.2) {
+    return this.get(`g${hex}_${intensity}`,
+      emissiveMat(hex, intensity, this.a.tex.glyphs, 'glyphs'));
+  }
+
   /** A soft pool of reflected light — fades in every direction. */
   pool(hex, intensity = 1) {
     return this.get(`p${hex}_${intensity}`, decalCached(hex, intensity, 1, 'glow'));
@@ -337,11 +343,38 @@ function city(ctx) {
         const hex = NEON_PALETTE[(rnd() * NEON_PALETTE.length) | 0];
         const ny = 3 + rnd() * (Math.min(h, 26) - 3);
         const np = ctx.at(s + (rnd() - 0.5) * 6, lat - side * (depth / 2 + 0.35), 0);
-        const vertical = rnd() < 0.45;
-        const sw = vertical ? 0.5 : 2.4 + rnd() * 3.5;
-        const sh = vertical ? 3 + rnd() * 5 : 0.7;
-        ctx.emit(hex, 3.2).box(np.x, np.y + ny, np.z, sw, sh, 0.3, yaw);
-        ctx.halo(new THREE.Vector3(np.x, np.y + ny, np.z), hex, Math.max(sw, sh) * 2.4, 0.42);
+        const vertical = rnd() < 0.55;
+        /* A row or column of characters rather than a blank glowing bar. The
+           bar read as exactly what it was — an untextured rectangle — and a
+           wall carrying nothing but blank rectangles is the same reason the
+           buildings themselves read as flat panels. */
+        const n = 2 + ((rnd() * 3) | 0);
+        const cell = vertical ? 1.05 + rnd() * 0.6 : 0.95 + rnd() * 0.5;
+        const gap = cell * 0.12;
+        const span = n * cell + (n - 1) * gap;
+        const along = ctx.forward(s);
+        const glyph = ctx.glyph(hex);
+        for (let k = 0; k < n; k++) {
+          // pick a character from the atlas — 4 x 4 cells
+          const gi = (rnd() * 16) | 0;
+          const u0 = (gi % 4) / 4, v0 = 1 - ((gi / 4 | 0) + 1) / 4;
+          const off = -span / 2 + cell / 2 + k * (cell + gap);
+          const cx = np.x + (vertical ? 0 : along.x * off);
+          const cz = np.z + (vertical ? 0 : along.z * off);
+          const cy = np.y + ny + (vertical ? -off : 0);
+          const ax = along.x * (cell / 2), az = along.z * (cell / 2);
+          const hy = cell / 2;
+          glyph.quad(
+            new THREE.Vector3(cx - ax, cy - hy, cz - az),
+            new THREE.Vector3(cx + ax, cy - hy, cz + az),
+            new THREE.Vector3(cx + ax, cy + hy, cz + az),
+            new THREE.Vector3(cx - ax, cy + hy, cz - az),
+            u0, v0, u0 + 0.25, v0 + 0.25
+          );
+        }
+        const sw = vertical ? cell : span;
+        const sh = vertical ? span : cell;
+        ctx.halo(new THREE.Vector3(np.x, np.y + ny, np.z), hex, Math.max(sw, sh) * 2.0, 0.36);
         /* Only some of them reach the road. Every sign casting a pool meant
            half a dozen overlapping on the same stretch, and additive blending
            piled them into a saturated slab with a hard rim — which reads as a

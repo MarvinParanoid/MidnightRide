@@ -115,6 +115,78 @@ function windowTexture(seed = 7) {
   return texture(c, { repeat: [1, 1], srgb: true });
 }
 
+/**
+ * An atlas of sign characters, drawn stroke by stroke.
+ *
+ * Not a font: a CJK font is not on every machine this runs on, and a missing
+ * one renders as tofu boxes, which is a worse sign than no sign. Han characters
+ * are strokes on a square grid — horizontals that rise slightly to the right,
+ * verticals that sometimes hook, a few diagonals — assembled as one part, or a
+ * narrow radical beside a body, or two halves stacked. Built that way they read
+ * correctly at the size and distance a neon sign is ever seen from, and they
+ * cannot accidentally spell anything.
+ */
+function glyphTexture(seed = 41) {
+  const rnd = mulberry32(seed);
+  const GRID = 4, CELL = 128, PAD = 22;
+  const [c, x] = canvas(GRID * CELL, GRID * CELL);
+  x.strokeStyle = '#fff';
+  x.lineCap = 'round';
+  x.lineJoin = 'round';
+
+  for (let i = 0; i < GRID * GRID; i++) {
+    const ox = (i % GRID) * CELL + PAD;
+    const oy = ((i / GRID) | 0) * CELL + PAD;
+    const size = CELL - PAD * 2;
+    x.lineWidth = Math.max(2.5, size * 0.085);
+
+    const U = (v) => ox + v * size;
+    const V = (v) => oy + v * size;
+    const line = (x0, y0, x1, y1) => {
+      x.beginPath(); x.moveTo(U(x0), V(y0)); x.lineTo(U(x1), V(y1)); x.stroke();
+    };
+    /* A horizontal stroke lifts a little to the right — the single thing that
+       stops a grid of straight lines looking like a waffle. */
+    const hor = (y, x0, x1) => line(x0, y, x1, y - 0.02);
+    const ver = (xx, y0, y1, hook) => {
+      x.beginPath(); x.moveTo(U(xx), V(y0)); x.lineTo(U(xx), V(y1));
+      if (hook) x.lineTo(U(xx - 0.1), V(y1 - 0.06));
+      x.stroke();
+    };
+
+    /** One component, inside the box it is given. */
+    const part = (x0, x1, y0, y1) => {
+      const w = x1 - x0, h = y1 - y0;
+      const style = (rnd() * 4) | 0;
+      if (style === 0) {                       // stacked bars through a stem
+        const n = 2 + ((rnd() * 3) | 0);
+        for (let k = 0; k < n; k++) hor(y0 + (h * (k + 0.5)) / n, x0, x1);
+        ver(x0 + w * (0.35 + rnd() * 0.3), y0, y1, rnd() < 0.4);
+      } else if (style === 1) {                // an enclosure with something in it
+        x.strokeRect(U(x0), V(y0), w * size, h * size);
+        hor(y0 + h * 0.5, x0 + w * 0.18, x1 - w * 0.18);
+        if (rnd() < 0.5) ver(x0 + w * 0.5, y0 + h * 0.2, y1 - h * 0.2, false);
+      } else if (style === 2) {                // a roof over a pair of legs
+        hor(y0 + h * 0.16, x0, x1);
+        line(x0 + w * 0.5, y0 + h * 0.3, x0 + w * 0.08, y1);
+        line(x0 + w * 0.5, y0 + h * 0.3, x1 - w * 0.08, y1);
+        if (rnd() < 0.45) hor(y0 + h * 0.6, x0 + w * 0.2, x1 - w * 0.2);
+      } else {                                 // a stem crossed once or twice
+        ver(x0 + w * 0.5, y0, y1, rnd() < 0.5);
+        hor(y0 + h * (0.3 + rnd() * 0.2), x0, x1);
+        if (rnd() < 0.6) hor(y0 + h * 0.75, x0 + w * 0.12, x1 - w * 0.12);
+      }
+    };
+
+    const layout = rnd();
+    if (layout < 0.4) part(0, 1, 0, 1);
+    else if (layout < 0.75) { part(0, 0.34, 0.05, 0.95); part(0.46, 1, 0, 1); }
+    else { part(0, 1, 0, 0.44); part(0.06, 0.94, 0.56, 1); }
+  }
+
+  return texture(c);
+}
+
 /** Patchy roughness: dark = mirror-smooth puddle, light = dry tarmac. */
 function wetnessTexture(seed = 3) {
   const rnd = mulberry32(seed);
@@ -155,6 +227,7 @@ export function assets() {
 
   const glow = glowTexture();
   const dot = dotTexture();
+  const glyphs = glyphTexture();
   const streak = streakTexture();
   const band = bandTexture();
   const wetness = wetnessTexture();
@@ -174,7 +247,7 @@ export function assets() {
     });
 
   cache = {
-    tex: { glow, dot, streak, band, wetness, windows },
+    tex: { glow, dot, streak, band, wetness, windows, glyphs },
 
     /* surfaces */
     asphalt: new THREE.MeshStandardMaterial({
