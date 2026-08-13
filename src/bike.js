@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { assets, neon } from './assets.js';
-import { damp, clamp, lerp } from './geo.js';
+import { damp, clamp, lerp, MeshBuilder } from './geo.js';
 
 const BEAM_FRAG = /* glsl */ `
   uniform vec3 color;
@@ -41,6 +41,127 @@ function beam(length, radius, opacity, color) {
     toneMapped: false,
   });
   return new THREE.Mesh(g, m);
+}
+
+/**
+ * The parts you actually look at.
+ *
+ * The chase camera sits behind and a little above the bike for the whole
+ * session, so what earns its place is what reads from there: the silhouette of
+ * the mirrors either side of the rider, the shape of a back rather than a
+ * capsule, a mudguard with a plate under the tail. Spokes and brake discs were
+ * considered and left out — from directly behind you see the tread of a wheel,
+ * never its face.
+ *
+ * Merged per material, so the whole lot costs four draw calls rather than
+ * twenty, the same way the traffic got its detail.
+ */
+/**
+ * A limb: an oriented box between two points. MeshBuilder can only yaw a box,
+ * and nothing on a person is axis-aligned, so the frame is built by hand.
+ */
+function strut(mb, a, b, w, h) {
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = dir.length();
+  if (len < 1e-4) return;
+  dir.divideScalar(len);
+  const ref = Math.abs(dir.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
+  const right = new THREE.Vector3().crossVectors(dir, ref).normalize().multiplyScalar(w / 2);
+  const up = new THREE.Vector3().crossVectors(right, dir).normalize().multiplyScalar(h / 2);
+  const P = (p, sx, sy) => new THREE.Vector3(
+    p.x + right.x * sx + up.x * sy, p.y + right.y * sx + up.y * sy, p.z + right.z * sx + up.z * sy);
+  const a0 = P(a, -1, -1), a1 = P(a, 1, -1), a2 = P(a, 1, 1), a3 = P(a, -1, 1);
+  const b0 = P(b, -1, -1), b1 = P(b, 1, -1), b2 = P(b, 1, 1), b3 = P(b, -1, 1);
+  mb.quad(a0, a1, b1, b0);
+  mb.quad(a1, a2, b2, b1);
+  mb.quad(a2, a3, b3, b2);
+  mb.quad(a3, a0, b0, b3);
+  mb.quad(a1, a0, a3, a2);
+  mb.quad(b0, b1, b2, b3);
+}
+
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+
+/**
+ * The rider, posed rather than assembled.
+ *
+ * He used to be a pile of capsules at whatever angle each happened to be given:
+ * a torso, two arms, two thighs, two shins, none of them meeting. From behind
+ * that reads as a bag on a seat. This builds an actual riding posture — pelvis
+ * on the seat, spine tipped forward, arms reaching down and out to the grips,
+ * knees up against the tank with the feet back on the pegs — out of limbs that
+ * join where a person's do.
+ */
+function riderFigure() {
+  const mb = new MeshBuilder();
+
+  const pelvis = V(0, 0.98, 0.44);
+  const chest = V(0, 1.24, 0.16);
+  const neck = V(0, 1.33, 0.05);
+  strut(mb, pelvis, chest, 0.3, 0.24);          // back, tipped forward
+  strut(mb, chest, neck, 0.24, 0.2);
+
+  for (const side of [-1, 1]) {
+    const shoulder = V(side * 0.15, 1.24, 0.14);
+    const elbow = V(side * 0.24, 1.0, -0.16);
+    const grip = V(side * 0.29, 0.92, -0.5);
+    strut(mb, chest, shoulder, 0.14, 0.18);      // deltoid, so the arm has a root
+    strut(mb, shoulder, elbow, 0.11, 0.12);
+    strut(mb, elbow, grip, 0.09, 0.1);
+    strut(mb, grip, V(side * 0.3, 0.9, -0.58), 0.1, 0.09);   // glove on the bar
+
+    const hip = V(side * 0.13, 0.94, 0.44);
+    const knee = V(side * 0.21, 0.78, 0.02);
+    const ankle = V(side * 0.19, 0.44, 0.3);
+    strut(mb, hip, knee, 0.16, 0.18);            // thigh, up against the tank
+    strut(mb, knee, ankle, 0.12, 0.13);
+    strut(mb, ankle, V(side * 0.19, 0.4, 0.44), 0.1, 0.1);   // boot on the peg
+  }
+
+  return mb;
+}
+
+/**
+ * The parts of the machine you actually look at.
+ *
+ * The chase camera sits behind and a little above the bike for the whole
+ * session, so what earns its place is what reads from there. Spokes and brake
+ * discs were considered and left out — from directly behind you see the tread
+ * of a wheel, never its face.
+ *
+ * Merged per material, so the whole lot costs three draw calls.
+ */
+function bikeDetail() {
+  const chrome = new MeshBuilder();
+  const black = new MeshBuilder();
+  const plate = new MeshBuilder();
+
+  /* rear mudguard over the tyre, and the plate hanging off it */
+  black.box(0, 0.78, 1.0, 0.2, 0.04, 0.34, 0);
+  black.box(0, 0.7, 1.14, 0.18, 0.16, 0.03, 0);
+  plate.box(0, 0.68, 1.16, 0.11, 0.07, 0.01, 0);
+
+  /* grab rail behind the seat */
+  for (const dx of [-1, 1]) chrome.box(dx * 0.15, 0.9, 0.62, 0.03, 0.03, 0.3, 0);
+
+  /* rear shock, seen through the gap under the tail */
+  chrome.box(0.06, 0.55, 0.5, 0.05, 0.3, 0.05, 0);
+
+  /* A seat hump was here, and a hump behind the rider's shoulders. The seat one
+     measured a single pixel; the shoulder one was a rectangle the size of his
+     back. Neither is here now — the shape of a back belongs to the back. */
+
+  return { chrome, black, plate };
+}
+
+/** Mirrors belong on the bar ends, which turn — not beside the rider's waist. */
+function mirrors() {
+  const mb = new MeshBuilder();
+  for (const dx of [-1, 1]) {
+    mb.box(dx * 0.24, 0.72, 0.14, 0.03, 0.16, 0.03, 0);
+    mb.box(dx * 0.26, 0.79, 0.13, 0.1, 0.06, 0.02, 0);
+  }
+  return mb;
 }
 
 export class Bike {
@@ -115,21 +236,31 @@ export class Bike {
     this.lean.add(this.exhaustGlow);
 
     /* ── rider ──────────────────────────────────────────── */
-    const torso = add(new THREE.CapsuleGeometry(0.17, 0.34, 4, 10), rider, 0, 1.13, 0.24, -0.62);
-    torso.scale.set(1, 1, 0.8);
-    this.head = add(new THREE.SphereGeometry(0.135, 12, 10), rider, 0, 1.4, -0.06);
-    const visorMesh = add(new THREE.SphereGeometry(0.118, 12, 10), visor, 0, 1.395, -0.11);
-    const arms = [];
-    for (const dx of [-0.19, 0.19]) {
-      arms.push(add(new THREE.CapsuleGeometry(0.055, 0.42, 3, 6), rider, dx, 1.02, 0.02, -1.15));
-      add(new THREE.CapsuleGeometry(0.085, 0.3, 3, 6), rider, dx * 0.9, 0.74, 0.38, 0.7); // thighs
-      add(new THREE.CapsuleGeometry(0.06, 0.26, 3, 6), rider, dx * 0.95, 0.5, 0.5, -0.2); // shins
-    }
+    const body = new THREE.Mesh(riderFigure().build(), rider);
+    this.lean.add(body);
+    /* The helmet stays a sphere: it is the one part of him that is round, and
+       the visor has to sit on it. */
+    this.head = add(new THREE.SphereGeometry(0.14, 12, 10), rider, 0, 1.42, 0.0);
+    add(new THREE.BoxGeometry(0.22, 0.045, 0.17), rider, 0, 1.5, -0.02);      // helmet ridge
+    add(new THREE.BoxGeometry(0.17, 0.09, 0.1), rider, 0, 1.35, -0.11);       // chin bar
+    const visorMesh = add(new THREE.SphereGeometry(0.122, 12, 10), visor, 0, 1.415, -0.05);
+
+    /* ── the detail pass ────────────────────────────────── */
+    const d = bikeDetail();
+    /* Dimmer than the same plate on a traffic car: this one is two metres from
+       the camera rather than twenty, and at 0.34 it read as a white card. */
+    const plateMat = new THREE.MeshBasicMaterial({ color: neon(0xd6c9a6, 0.15), toneMapped: false });
+    this.lean.add(
+      new THREE.Mesh(d.chrome.build(), chrome),
+      new THREE.Mesh(d.black.build(), black),
+      new THREE.Mesh(d.plate.build(), plateMat)
+    );
+    this.steerPivot.add(new THREE.Mesh(mirrors().build(), chrome));
 
     /* In first person the camera sits where the rider's head is, so the head
        and the visor wrap around the lens — you end up looking at the inside of
        a blue sphere. Legs and the bike itself stay: they are what you'd see. */
-    this.hiddenInFirstPerson = [torso, this.head, visorMesh, ...arms];
+    this.hiddenInFirstPerson = [body, this.head, visorMesh];
 
     /* ── lights ─────────────────────────────────────────── */
     this.headMat = new THREE.MeshBasicMaterial({ color: neon(0xfff0d8, 4), toneMapped: false });
