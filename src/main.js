@@ -309,6 +309,7 @@ function applyTier(tier) {
   sky.envEvery = tier.envEvery;
   ssr.material.uniforms.uSteps.value = tier.ssrSteps;
   ssr.enabled = tier.ssrSteps > 0;
+  ssr.setSize(viewSize.x, viewSize.y);
 }
 const guard = new QualityGuard(quality.index, applyTier);
 

@@ -4,6 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 /** Vignette + grain + chromatic fringe + radial speed blur, in one pass. */
 const GradeShader = {
@@ -127,11 +128,11 @@ const SSRShader = {
         gl_FragColor = vec4(vec3(max(0.0, dot(dn, uUpView))), 1.0); return;
       }
       float wet = uWet;
-      if (wet < 0.01) { gl_FragColor = vec4(col, 1.0); return; }
+      if (wet < 0.01) { gl_FragColor = vec4(0.0); return; }
 
       vec3 P = viewPos(vUv);
       // sky, or so far off that a reflection would be a single pixel of noise
-      if (-P.z > 260.0 || -P.z < 0.05) { gl_FragColor = vec4(col, 1.0); return; }
+      if (-P.z > 260.0 || -P.z < 0.05) { gl_FragColor = vec4(0.0); return; }
 
       /* The normal comes from the depth buffer's own slope. On a road that is
          steady; on a silhouette edge it is nonsense, which is exactly where the
@@ -142,11 +143,11 @@ const SSRShader = {
          mirrors the sodium bands into a great orange cross across the frame. */
       if (dot(n, P) > 0.0) n = -n;
       float floorness = smoothstep(0.88, 0.98, dot(n, uUpView));
-      if (floorness < 0.01) { gl_FragColor = vec4(col, 1.0); return; }
+      if (floorness < 0.01) { gl_FragColor = vec4(0.0); return; }
 
       vec3 V = normalize(P);
       vec3 R = reflect(V, n);
-      if (R.z > 0.0) { gl_FragColor = vec4(col, 1.0); return; }   // pointing behind the eye
+      if (R.z > 0.0) { gl_FragColor = vec4(0.0); return; }   // pointing behind the eye
 
       /* Start each ray a random fraction of a step along. Without it every ray
          in a neighbourhood crosses the surface at the same step index and the
@@ -187,7 +188,8 @@ const SSRShader = {
         }
       }
 
-      if (found > 0.5) {
+      if (found < 0.5) { gl_FragColor = vec4(0.0); return; }
+      {
         vec3 refl = texture2D(tDiffuse, hitUv).rgb;
         /* Fade at the edges of the screen, where the information simply is not
            there, and by grazing angle — a road seen from above barely mirrors. */
@@ -195,13 +197,82 @@ const SSRShader = {
         float edge = (1.0 - smoothstep(0.75, 1.0, max(e.x, e.y)));
         float fresnel = pow(1.0 - max(0.0, dot(-V, n)), 2.4);
         float k = clamp(uStrength * wet * floorness * fresnel * edge, 0.0, 0.85);
-        col = mix(col, refl, k);
+        gl_FragColor = vec4(refl, k);
       }
-
-      gl_FragColor = vec4(col, 1.0);
     }
   `,
 };
+
+
+/** Lay the half-resolution reflection over the frame it was computed from. */
+const SSRCompositeShader = {
+  uniforms: { tDiffuse: { value: null }, tRefl: { value: null } },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse, tRefl;
+    varying vec2 vUv;
+    void main() {
+      vec4 r = texture2D(tRefl, vUv);
+      gl_FragColor = vec4(mix(texture2D(tDiffuse, vUv).rgb, r.rgb, r.a), 1.0);
+    }
+  `,
+};
+
+/**
+ * The reflection is computed at half resolution and blended back at full.
+ *
+ * Marching every pixel of the road was enough to push a machine below the frame
+ * rate the quality guard watches, and the guard then stepped the whole renderer
+ * down a tier — so the reflections appeared for a few seconds and vanished. A
+ * reflection on wet tarmac is a low-frequency thing; at half resolution it
+ * costs a quarter as much and looks the same.
+ */
+class SSRPass extends Pass {
+  constructor(depthTexture, scale = 0.5) {
+    super();
+    this.scale = scale;
+    this.target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
+    this.material = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.clone(SSRShader.uniforms),
+      vertexShader: SSRShader.vertexShader,
+      fragmentShader: SSRShader.fragmentShader,
+    });
+    this.material.uniforms.tDepth.value = depthTexture;
+    this.composite = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.clone(SSRCompositeShader.uniforms),
+      vertexShader: SSRCompositeShader.vertexShader,
+      fragmentShader: SSRCompositeShader.fragmentShader,
+    });
+    this.quadA = new FullScreenQuad(this.material);
+    this.quadB = new FullScreenQuad(this.composite);
+  }
+
+  setSize(w, h) {
+    this.target.setSize(Math.max(2, Math.floor(w * this.scale)), Math.max(2, Math.floor(h * this.scale)));
+  }
+
+  render(renderer, writeBuffer, readBuffer) {
+    this.material.uniforms.tDiffuse.value = readBuffer.texture;
+    renderer.setRenderTarget(this.target);
+    renderer.clear();
+    this.quadA.render(renderer);
+
+    this.composite.uniforms.tDiffuse.value = readBuffer.texture;
+    this.composite.uniforms.tRefl.value = this.target.texture;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    if (this.clear) renderer.clear();
+    this.quadB.render(renderer);
+  }
+
+  dispose() {
+    this.target.dispose();
+    this.quadA.dispose();
+    this.quadB.dispose();
+  }
+}
 
 /**
  * Run the bloom chain at a fraction of the screen resolution. Its radius is in
@@ -238,8 +309,7 @@ export function createComposer(renderer, scene, camera, quality = {}) {
   composer.renderTarget2.depthTexture = target.depthTexture;
   composer.addPass(new RenderPass(scene, camera));
 
-  const ssr = new ShaderPass(SSRShader);
-  ssr.material.uniforms.tDepth.value = target.depthTexture;
+  const ssr = new SSRPass(target.depthTexture);
   composer.addPass(ssr);
 
   /* Leave the threshold alone. Raising it from 0.42 to 0.70 to shrink the halo
