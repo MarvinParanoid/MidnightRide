@@ -1,6 +1,8 @@
 import { mtof } from './core.js';
 import { clamp, smoothstep } from '../geo.js';
-import { STATIONS, chordNotes, stationFor, pickSection, makeArp, makeLead, voice } from './stations.js';
+import {
+  STATIONS, chordNotes, stationFor, pickSection, makeArp, makeLead, makeBass, makeDrums, voice,
+} from './stations.js';
 
 const KEYS = [45, 43, 47, 40, 50];        // A, G, B, E, D — comfortable roots
 const DWELL = 95;                          // seconds a station holds before it may change
@@ -59,6 +61,8 @@ export class Music {
     this.section = { name: 'full', drums: 1, arp: 1, lead: 1, pad: 1 };
     this.arpPattern = makeArp();
     this.leadPhrase = makeLead();
+    this.bassFigure = makeBass();
+    this.drumPattern = makeDrums(this.station.drums);
 
     this.bpm = 88;
     this.step = 0;
@@ -106,6 +110,9 @@ export class Music {
     this.progression = this.station.progressions[
       (Math.random() * this.station.progressions.length) | 0
     ];
+    // a new station is a new band, so it does not inherit the last one's kit
+    this.drumPattern = makeDrums(this.station.drums);
+    this.bassFigure = makeBass();
     this.sinceStation = 0;
     this.wantStation = null;
     this.delay.delayTime.setTargetAtTime((60 / this.bpm) * this.station.delayBeats, at, 0.3);
@@ -205,6 +212,8 @@ export class Music {
       if (bar % 8 === 0) {
         this.section = pickSection();
         this.arpPattern = makeArp();          // a new figure every eight bars
+        this.bassFigure = makeBass();
+        this.drumPattern = makeDrums(st.drums);
         if (Math.random() < 0.5) this.leadPhrase = makeLead();
         if (Math.random() < 0.4) {
           this.progression = st.progressions[(Math.random() * st.progressions.length) | 0];
@@ -236,21 +245,21 @@ export class Music {
     }
 
     if (st.drums !== 'none' && this.section.drums) {
-      const four = st.drums === 'four';
+      const d = this.drumPattern;
       const fill = bar % 8 === 7;               // last bar of the section
-      if (s === 0 || s === 8 || (e > 0.55 && (s === 4 || s === 12))) {
+      // the pattern is the section's; the extra weight on 2 and 4 is the speed
+      if (d.kick.includes(s) || (e > 0.55 && (s === 4 || s === 12))) {
         if (!(fill && s === 8 && Math.random() < 0.5)) this.kick(t);
       }
-      if (four ? (s === 4 || s === 12) : (s === 4 || s === 12 || s === 14)) this.snare(t);
+      if (d.snare.includes(s)) this.snare(t);
       // a fill rolls out of the section instead of the pattern simply repeating
       if (fill && s >= 12 && s % 2 === 0 && Math.random() < 0.7) this.snare(t + this.stepDur * 0.5);
-      if (st.hats && s % 2 === 0) this.hat(t, s % 4 === 0 ? 0.5 : 0.26 + Math.random() * 0.16);
+      if (st.hats && d.hat.includes(s)) this.hat(t, s % 4 === 0 ? 0.5 : 0.26 + Math.random() * 0.16);
       if (st.hats && e > 0.6 && s === 14) this.hat(t, 0.6, true);
     }
 
-    if (s === 0 || s === 6 || s === 8 || s === 14) {
-      this.bass(root - 12, t, s === 0 ? 0.5 : 0.28);
-    }
+    const bn = this.bassFigure.find((x) => x.s === s);
+    if (bn) this.bass(root - 12 + bn.off, t, bn.dur);
 
     if (s === 0 && e > 0.55 && st.lead && this.section.lead) {
       for (const note of this.leadPhrase) {

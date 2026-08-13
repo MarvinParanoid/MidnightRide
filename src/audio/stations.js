@@ -68,6 +68,64 @@ export function makeLead(rnd = Math.random) {
   return out;
 }
 
+/**
+ * A bass figure for the section.
+ *
+ * The arp and the lead have been regenerating every eight bars for a while, but
+ * the bass played the same four hits — steps 0, 6, 8 and 14 — for as long as the
+ * radio was on. It is the one voice that never stops and never rests, so it is
+ * the one whose loop you learn first.
+ */
+export function makeBass(rnd = Math.random) {
+  const shapes = [
+    [0, 6, 8, 14],
+    [0, 8],
+    [0, 3, 8, 11],
+    [0, 6, 8, 12, 14],
+    [0, 4, 8, 12],
+    [0, 7, 8, 15],
+    [0, 8, 10, 14],
+    [0, 6, 10],
+  ];
+  const at = shapes[(rnd() * shapes.length) | 0];
+  return at.map((s) => ({
+    s,
+    // the fifth or the octave now and then, so a four-bar loop keeps moving;
+    // never on the downbeat, which is what tells you what the chord is
+    off: s === 0 ? 0 : rnd() < 0.18 ? 7 : rnd() < 0.12 ? 12 : 0,
+    dur: s === 0 ? 0.5 : 0.28,
+  }));
+}
+
+/**
+ * A kit pattern for the section. Same idea: one fixed bar of kick and snare is
+ * the first thing an hour-long loop gives away.
+ */
+export function makeDrums(kind, rnd = Math.random) {
+  const tight = kind === 'tight';
+
+  const kick = new Set([0]);                       // the downbeat is not negotiable
+  kick.add(tight && rnd() < 0.35 ? 10 : 8);
+  if (rnd() < (tight ? 0.55 : 0.3)) kick.add(rnd() < 0.5 ? 3 : 6);
+  if (tight && rnd() < 0.3) kick.add(11);
+
+  const snare = new Set([4, 12]);                  // backbeat stays put
+  if (tight) snare.add(14);
+  if (rnd() < 0.25) snare.add(rnd() < 0.5 ? 7 : 15);
+
+  /* eighths, eighths opening into sixteenths, or a broken figure */
+  const mode = rnd();
+  const hat = [];
+  for (let s = 0; s < 16; s++) {
+    const on = mode < 0.45 ? s % 2 === 0
+      : mode < 0.75 ? (s % 2 === 0 || s >= 8)
+        : s % 4 !== 1;
+    if (on) hat.push(s);
+  }
+
+  return { kick: [...kick], snare: [...snare], hat };
+}
+
 /** Same chord, different spacing — rotate some notes up an octave. */
 export function voice(notes, rnd = Math.random) {
   // rotation only: an extra octave on top of the station's own padOct pushed
