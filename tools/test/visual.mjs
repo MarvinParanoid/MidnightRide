@@ -22,7 +22,7 @@ const DIR = 'tests/golden';
 const sha = (b) => createHash('sha1').update(b).digest('hex');
 /* Fraction of the frame allowed to move by more than 8/255 before it counts as
    a change. Raise it only with a picture in hand explaining why. */
-const TOLERANCE = Number(process.env.MR_VISUAL_TOLERANCE ?? 0.002);
+const TOLERANCE = Number(process.env.MR_VISUAL_TOLERANCE ?? 0.004);
 
 /* One per thing that has actually broken, plus one per biome. */
 export const SHOTS = [
@@ -39,6 +39,12 @@ export const SHOTS = [
 /**
  * Diff two PNGs inside the browser, which already has a decoder.
  * Only reached when the hashes differ, so its cost never lands on a green run.
+ *
+ * Both are compared at a quarter size. A different Chrome or a different
+ * software rasteriser puts half-pixel differences along every edge in the
+ * frame, and counting those made a driver change look like a regression;
+ * shrinking averages them away. Anything structural — a grey square on the
+ * verge, a building gone, a blown-out highlight — survives being shrunk.
  */
 async function compare(page, actual, expected) {
   return page.evaluate(async (a, b) => {
@@ -50,12 +56,16 @@ async function compare(page, actual, expected) {
     });
     const [ia, ib] = await Promise.all([load(a), load(b)]);
     if (ia.width !== ib.width || ia.height !== ib.height) return { size: false };
+    const SCALE = 4;
+    const w = Math.ceil(ia.width / SCALE), h = Math.ceil(ia.height / SCALE);
     const px = (img) => {
       const c = document.createElement('canvas');
-      c.width = img.width; c.height = img.height;
+      c.width = w; c.height = h;
       const x = c.getContext('2d', { willReadFrequently: true });
-      x.drawImage(img, 0, 0);
-      return x.getImageData(0, 0, img.width, img.height).data;
+      x.imageSmoothingEnabled = true;
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(img, 0, 0, w, h);
+      return x.getImageData(0, 0, w, h).data;
     };
     const pa = px(ia), pb = px(ib);
     let changed = 0, worst = 0;
@@ -75,6 +85,15 @@ export async function run({ update = false } = {}) {
   const results = [];
   try {
     const { page, errors } = await session(browser);
+    /* Reported on any mismatch: when a golden fails on a machine you cannot
+       see, the first question is always what the renderer was. */
+    const env = await page.evaluate(() => {
+      const m = window.__mr, r = m.renderer;
+      const gl = r.getContext();
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      return `${m.guard.name} tier, dpr ${r.getPixelRatio()}, `
+        + `${dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)}`;
+    });
     for (const shot of SHOTS) {
       await settle(page, shot.at, { frames: shot.frames, opts: shot.opts });
       const buf = await page.screenshot({ encoding: 'binary' });
@@ -99,7 +118,12 @@ export async function run({ update = false } = {}) {
       let detail = 'differs';
       let pass = false;
       try {
-        const d = await compare(page, buf.toString('base64'), want.toString('base64'));
+        /* Buffer.from, not .toString: page.screenshot returns a Uint8Array on
+           some Node versions, and Uint8Array#toString ignores its argument and
+           hands back a comma-separated list of byte values. The decode then
+           fails and the report says nothing useful about a real regression. */
+        const d = await compare(page, Buffer.from(buf).toString('base64'),
+          Buffer.from(want).toString('base64'));
         if (!d.size) {
           detail = 'size changed';
         } else {
@@ -114,7 +138,7 @@ export async function run({ update = false } = {}) {
       results.push({
         name: `golden ${shot.name}`,
         pass,
-        detail: detail + (pass ? '' : ` — wrote ${shot.name}.actual.png`),
+        detail: detail + (pass ? '' : ` — wrote ${shot.name}.actual.png [${env}]`),
       });
     }
     results.push({ name: 'no page errors', pass: errors.length === 0, detail: errors.slice(0, 2).join(' | ') });

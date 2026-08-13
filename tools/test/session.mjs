@@ -100,6 +100,14 @@ export async function session(browser, { width = 1152, height = 648, seed = 2026
   await page.goto(URL, { waitUntil: 'networkidle0' });
   await page.waitForFunction(() => window.__mr && window.__mr.record.active, { timeout: 20000 });
   await page.mouse.click(width / 2, height / 2);   // past the title screen
+  /* Quality is chosen from the machine, and the machine is not the same one
+     twice: `detectQuality` calls anything with two cores or fewer weak, and a
+     standard GitHub runner has exactly two. CI was therefore rendering in the
+     cut-down profile — half the rain, a smaller bloom buffer, no MSAA — which
+     measured as 14.4% of the frame moving against a baseline recorded on a
+     sixteen-core box. Pin it, like the clocks. */
+  await page.evaluate(() => window.__mr.guard.step(0));
+
   /* The audio schedulers run off the audio clock, which is wall time, and they
      draw from the same Math.random stream as everything else — so how many
      numbers they consume depends on how long the run happened to take, and the
