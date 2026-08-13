@@ -37,7 +37,13 @@ const DECAL_FRAG = /* glsl */ `
        floor so the reflection survives, and take enough off the flattest
        fragments that they stop stacking into a bar. */
     float graze = abs(dot(normalize(vEye), vUp));
-    float fade = 0.15 + 0.85 * pow(graze, 0.4);
+    /* The floor used to be 0.15, which kept a sliver of every pool alive no
+       matter how flat the view got — and a quad seen from a metre above the
+       road compresses twenty metres of falloff into three pixels, so that
+       sliver arrives as a knife-edged slab of colour lying across the lane.
+       Low enough now that an edge-on pool goes out, high enough that the wet
+       sheen a chase camera sees over most of the road survives. */
+    float fade = 0.03 + 0.97 * pow(graze, 0.55);
 
     /* The falloff is computed, not sampled.
        It used to come from a texture, and a flat quad seen at a grazing angle
@@ -45,8 +51,14 @@ const DECAL_FRAG = /* glsl */ `
        where a radial gradient has averaged out to a flat grey. The quad then
        stopped fading at its own border and drew its outline: a soft grey
        square sitting on the verge next to a lamp. Arithmetic has no mips. */
+    /* The lit ellipse is deliberately shorter than the quad it lives on. A pool
+       is long and thin — twenty metres down the road, eight across — and the
+       falloff along its length, seen from a metre above the tarmac, projects
+       into three pixels. The quad's far edge then arrives as a knife-edged slab
+       of colour lying across the lane. Ending the light well inside the
+       geometry means the edge never gets there. */
     vec2 e = (vUv - 0.5) * 2.0;
-    float d = mix(abs(e.x), length(e), radial);
+    float d = mix(abs(e.x), length(vec2(e.x, e.y * 1.45)), radial);
     float shape = pow(max(0.0, 1.0 - d), mix(2.2, 2.6, radial));
 
     gl_FragColor = vec4(color * shape * fade, 1.0);
@@ -321,17 +333,37 @@ function city(ctx) {
          had only reserved 5, which put them out in the carriageway. */
       dark.box(c.x, c.y + h / 2 - 1, c.z, depth, h, w, yaw);
 
-      // lit window field on the road-facing wall, spanning the frontage
+      /* Lit windows on the wall facing the road *and* on the two ends.
+         Only the frontage used to carry them, which left the long side of every
+         building — the face you spend the most time looking at as you pass it —
+         a flat slab with nothing on it. A large untextured face a stone's throw
+         away, ten levels darker than the sky and with perfectly straight edges,
+         reads as a pane of dark glass laid over the picture rather than as a
+         building; that is what the "translucent squares" turned out to be. */
+      const y0 = ctx.at(s, lat, 0).y + 0.6, y1 = ctx.at(s, lat, 0).y + h - 1.6;
+      const rows = Math.max(1, h / 3.2) | 0;
+      /* Offset into the window texture per face, or every building in the city
+         lights the same rooms. */
+      const wall = (cx, cz, ax, az, cols) => {
+        const u = (rnd() * 4) | 0, v = (rnd() * 4) | 0;
+        win.quad(
+          new THREE.Vector3(cx - ax, y0, cz - az),
+          new THREE.Vector3(cx + ax, y0, cz + az),
+          new THREE.Vector3(cx + ax, y1, cz + az),
+          new THREE.Vector3(cx - ax, y1, cz - az),
+          u, v, u + cols, v + rows
+        );
+      };
+
       const face = ctx.at(s, lat - side * (depth / 2 + 0.06), 0);
       const along = ctx.forward(s).multiplyScalar(w / 2 - 0.4);
-      const y0 = face.y + 0.6, y1 = face.y + h - 1.6;
-      win.quad(
-        new THREE.Vector3(face.x - along.x, y0, face.z - along.z),
-        new THREE.Vector3(face.x + along.x, y0, face.z + along.z),
-        new THREE.Vector3(face.x + along.x, y1, face.z + along.z),
-        new THREE.Vector3(face.x - along.x, y1, face.z - along.z),
-        0, 0, Math.max(1, w / 5) | 0, Math.max(1, h / 3.2) | 0
-      );
+      wall(face.x, face.z, along.x, along.z, Math.max(1, w / 5) | 0);
+
+      const across = ctx.right(s).multiplyScalar(depth / 2 - 0.4);
+      for (const end of [-1, 1]) {
+        const e = ctx.at(s + end * (w / 2 + 0.06), lat, 0);
+        wall(e.x, e.z, across.x, across.z, Math.max(1, depth / 5) | 0);
+      }
 
       // aircraft warning beacon on the tall ones
       if (h > 48) {
@@ -381,7 +413,7 @@ function city(ctx) {
            painted rectangle, not as a reflection. */
         if (rnd() < 0.45) {
           const rp = ctx.at(s, side * (ROAD_HALF - 1.5 - rnd() * 3), 0.02);
-          ctx.pool(hex, 0.4).decal(rp, ctx.right(s), ctx.forward(s), 8, 22, 0.02);
+          ctx.pool(hex, 0.4).decal(rp, ctx.right(s), ctx.forward(s), 9, 18, 0.02);
         }
       }
       d += w + 2 + rnd() * 10;

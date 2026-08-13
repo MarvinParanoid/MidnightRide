@@ -156,7 +156,7 @@ export class Bike {
     /* Lifted off the road and pulled in close. Sitting at tarmac level two
        metres ahead it stopped reading as bounce and became a spotlight pointed
        at the ground — obvious once the road itself got darker. */
-    this.bounce = new THREE.PointLight(0xffc98a, 0.5, 3.2, 2.0);
+    this.bounce = new THREE.PointLight(0xffc98a, 0.26, 2.8, 2.0);
     this.bounce.position.set(0, 0.52, -1.15);
     this.lean.add(this.bounce);
 
@@ -331,7 +331,7 @@ export class Bike {
 
   updateSpray(dt, speed, rain) {
     const amount = clamp(speed / 30, 0, 1) * rain;
-    this.sprayMat.opacity = amount * 0.11;
+    this.sprayMat.opacity = amount * 0.07;
     if (amount <= 0.01) return;
     const p = this.spray.geometry.attributes.position;
     const c = this.spray.geometry.attributes.color;
