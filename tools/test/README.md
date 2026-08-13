@@ -2,7 +2,7 @@
 
 ```
 npm run dev                    # the suite drives the real dev server
-npm test                       # everything, ~20 min
+npm test                       # everything, ~8 min locally
 npm test -- music              # one suite, instant
 npm test -- visual --update    # re-record the golden frames
 ```
@@ -34,10 +34,15 @@ something, usually much later than it should have been.
 | suite | catches | runtime |
 |---|---|---|
 | `music` | arp figures that drift against the bar, a degree walk that repeats a pitch on a triad, a weighted deck that clumps worse than dice, a bass figure that never changes | instant, no browser |
-| `determinism` | the harness itself breaking — everything below depends on it | ~2 min |
-| `world` | geometry standing in the carriageway, a tunnel with no inside | ~3.5 min |
-| `budgets` | a change that quietly doubles the draw calls; a render target allocated and never disposed | ~4 min |
-| `visual` | squares, blown-out highlights, missing geometry — whatever a picture shows | ~3 min |
+| `determinism` | the harness itself breaking — everything below depends on it | ~1 min |
+| `world` | geometry standing in the carriageway, a tunnel with no inside | ~1.5 min |
+| `budgets` | a change that quietly doubles the draw calls; a render target allocated and never disposed | ~2.5 min |
+| `visual` | squares, blown-out highlights, missing geometry — whatever a picture shows | ~3.5 min |
+
+Only `visual` renders at the shipping resolution. Draw calls, raycasts and the
+determinism property do not depend on it, and a software rasteriser charges for
+every pixel — the first CI run spent eleven minutes on determinism alone before
+those three moved to a 640x360 window.
 
 ## The pinned session
 

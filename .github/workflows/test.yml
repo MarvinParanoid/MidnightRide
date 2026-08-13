@@ -28,7 +28,7 @@ jobs:
   # but it does not need a GPU on the runner.
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

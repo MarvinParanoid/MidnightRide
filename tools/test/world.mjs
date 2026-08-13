@@ -16,7 +16,8 @@ export async function run() {
   const browser = await launch();
   const results = [];
   try {
-    const { page, errors } = await session(browser);
+    // raycasts against the scene graph, not against pixels: a small window will do
+    const { page, errors } = await session(browser, { width: 640, height: 360 });
     /* One evaluate per stretch of road, not one for the whole drive: a single
        call that runs for minutes trips the devtools protocol timeout, and a
        harness that dies on its own length is worse than no harness. */

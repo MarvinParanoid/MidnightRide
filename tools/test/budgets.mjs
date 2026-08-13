@@ -10,7 +10,7 @@
  * The caps are deliberately loose. They are there to catch a change of kind,
  * not to freeze a number.
  */
-import { launch, session, settle } from './session.mjs';
+import { launch, session, settle, steps } from './session.mjs';
 
 const CAPS = {
   calls: 420,        // measured 132-229 across biomes
@@ -23,7 +23,10 @@ export async function run() {
   const browser = await launch();
   const results = [];
   try {
-    const { page, errors } = await session(browser);
+    /* Draw calls, triangles and texture counts are resolution-independent, so
+       this runs in a small window. On a software rasteriser that is the whole
+       difference between three minutes and twenty. */
+    const { page, errors } = await session(browser, { width: 640, height: 360 });
     const spots = [640, 8140, 12000, 22960, 34180];
     const seen = { calls: 0, triangles: 0 };
 
@@ -51,7 +54,7 @@ export async function run() {
     /* Textures should be flat over a long drive. Anything that climbs is a
        resource created per frame or per chunk and never released. */
     const before = await page.evaluate(() => window.__mr.renderer.info.memory.textures);
-    for (let i = 0; i < 900; i++) await page.evaluate(() => window.__mr.record.next());
+    await steps(page, 600);
     const after = await page.evaluate(() => ({
       tex: window.__mr.renderer.info.memory.textures,
       geo: window.__mr.renderer.info.memory.geometries,

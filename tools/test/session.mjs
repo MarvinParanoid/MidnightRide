@@ -112,7 +112,7 @@ export async function session(browser, { width = 1152, height = 648, seed = 2026
   });
 
   // the loop is already halted, so time only passes when a test asks for it
-  for (let i = 0; i < 30; i++) await page.evaluate(() => window.__mr.record.next());
+  await steps(page, 30);
   return { page, errors };
 }
 
@@ -129,7 +129,23 @@ export async function settle(page, distance, { speed = 34, frames = 60, opts = {
     fps: 30, hints: false, grain: 0, camCycle: false, camMode: 0, hud: false, ...o,
   }), opts);
   await page.evaluate(([d, v]) => window.__mr.teleport(d, v), [distance, speed]);
-  for (let i = 0; i < frames; i++) await page.evaluate(() => window.__mr.record.next());
+  await steps(page, frames);
+}
+
+/**
+ * Advance n frames.
+ *
+ * The loop lives in the page, not here: one devtools round trip per frame cost
+ * more than the frame did on a fast machine and still added minutes on a slow
+ * one. Batched so no single call sits long enough to trip the protocol timeout.
+ */
+export async function steps(page, n, batch = 60) {
+  for (let done = 0; done < n; done += batch) {
+    const k = Math.min(batch, n - done);
+    await page.evaluate(async (k) => {
+      for (let i = 0; i < k; i++) await window.__mr.record.next();
+    }, k);
+  }
 }
 
 /** Freeze the simulation so repeated renders of the same instant are identical. */

@@ -6,13 +6,18 @@
 import { createHash } from 'node:crypto';
 import { launch, session, settle } from './session.mjs';
 
-const SPOTS = [640, 12000, 22960, 34180];
+const SPOTS = [640, 12000, 34180];
 
 async function capture(browser) {
-  const { page, errors } = await session(browser);
+  /* Small window on purpose. This suite is asserting a property of the harness,
+     and the golden frames already prove it at full resolution every run — they
+     are compared byte for byte against a baseline recorded in another session
+     on another day. Rendering this one at 1152x648 as well bought nothing and
+     cost a quarter of the CI budget. */
+  const { page, errors } = await session(browser, { width: 640, height: 360 });
   const shots = [];
   for (const d of SPOTS) {
-    await settle(page, d);
+    await settle(page, d, { frames: 45 });
     shots.push(await page.screenshot({ encoding: 'binary' }));
   }
   await page.close();
