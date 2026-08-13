@@ -42,6 +42,7 @@ camera.position.set(0, 3, 8);
 const { composer, bloom, grade } = createComposer(renderer, scene, camera, quality);
 
 /* ── world ─────────────────────────────────────────────────── */
+scene.add(assets().glowField.mesh);     // every glow in the game, one draw call
 const road = new Road(scene);
 const bike = new Bike(scene);
 const traffic = new Traffic(scene, road);
@@ -623,6 +624,7 @@ function frame() {
   grade.uniforms.uWet.value = rainAmount * clamp(state.v / 40, 0, 1) * 0.55;
   grade.uniforms.uGrain.value = (state.photo ? 0.006 : 0.014) * (record.active ? record.grain : 1);
 
+  assets().glowField.update(scene);
   composer.render();
 
   /* the drawing buffer is only intact for the rest of this task */

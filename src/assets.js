@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mulberry32 } from './geo.js';
+import { Glow, GlowField } from './glow.js';
 
 /* ────────────────────────────────────────────────────────────
    Every texture in the game is drawn here, at runtime, on a
@@ -201,21 +202,10 @@ export function assets() {
 
     /* additive helpers */
     additive,
-    glowSprite: (color, scale, opacity = 1) => {
-      const m = new THREE.SpriteMaterial({
-        map: glow,
-        color,
-        transparent: true,
-        opacity,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        fog: false,
-        toneMapped: false,
-      });
-      const s = new THREE.Sprite(m);
-      s.scale.setScalar(scale);
-      return s;
-    },
+    /* Not a THREE.Sprite any more — a handle the GlowField renders in one
+       instanced draw. Same properties, so nothing at the call sites changed. */
+    glowField: new GlowField(glow),
+    glowSprite: (color, scale, opacity = 1) => new Glow(color, scale, opacity),
   };
 
   return cache;
