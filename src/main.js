@@ -39,7 +39,7 @@ scene.fog = new THREE.FogExp2(0x06070f, 0.0066);
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.4, 5200);
 camera.position.set(0, 3, 8);
 
-const { composer, bloom, grade } = createComposer(renderer, scene, camera, quality);
+const { composer, bloom, grade, ssr } = createComposer(renderer, scene, camera, quality);
 
 /* ── world ─────────────────────────────────────────────────── */
 scene.add(assets().glowField.mesh);     // every glow in the game, one draw call
@@ -307,6 +307,8 @@ function applyTier(tier) {
   applyBloomScale(bloom, viewSize, tier.bloomScale);
   rain.setDensity(tier.rain);
   sky.envEvery = tier.envEvery;
+  ssr.material.uniforms.uSteps.value = tier.ssrSteps;
+  ssr.enabled = tier.ssrSteps > 0;
 }
 const guard = new QualityGuard(quality.index, applyTier);
 
@@ -622,6 +624,14 @@ function frame() {
   grade.uniforms.uTime.value = now;
   grade.uniforms.uSpeed.value = Math.pow(speed01, 1.6);
   grade.uniforms.uWet.value = rainAmount * clamp(state.v / 40, 0, 1) * 0.55;
+
+  /* Reflections need the camera as it is this frame, and only appear on a road
+     that is actually wet — a dry one is not a mirror. */
+  ssr.material.uniforms.uProj.value.copy(camera.projectionMatrix);
+  ssr.material.uniforms.uInvProj.value.copy(camera.projectionMatrixInverse);
+  ssr.material.uniforms.uUpView.value
+    .set(0, 1, 0).transformDirection(camera.matrixWorldInverse).normalize();
+  ssr.material.uniforms.uWet.value = clamp(rainAmount * 1.2, 0, 1) * (1 - state.enclosure * 0.7);
   grade.uniforms.uGrain.value = (state.photo ? 0.006 : 0.014) * (record.active ? record.grain : 1);
 
   assets().glowField.update(scene);

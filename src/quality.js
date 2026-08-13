@@ -10,10 +10,14 @@ import { isTouchDevice } from './input.js';
  * and steps down only after the frame rate has actually been poor for several
  * seconds — and steps back up if it turns out it was a passing squall.
  */
+/* ssrSteps is how far the reflection pass is allowed to march per pixel; zero
+   turns it off. It is the one setting here whose cost could not be measured on
+   this machine — a software rasteriser on a busy box gave a wider spread than
+   the effect itself — so the low profile does without it rather than guess. */
 export const TIERS = [
-  { name: 'high', pixelRatio: 1.75, bloomScale: 1.0, rain: 1.0, envEvery: 6, samples: 2 },
-  { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2 },
-  { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0 },
+  { name: 'high', pixelRatio: 1.75, bloomScale: 1.0, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 20 },
+  { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 12 },
+  { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 0 },
 ];
 
 /** Where to start before we know anything. Phones start low; everything else high. */
