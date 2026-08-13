@@ -607,7 +607,11 @@ function frame() {
     });
     audio.setEnclosure(state.enclosure);
     music.setContext({ biome, remote: state.remote, rain: rainAmount });
-    music.tick(clamp(kmh / 230, 0, 1), dt);
+    /* Normalised against the speeds people actually ride at, not the top speed.
+       Measured over a drive: p10 80 km/h, median 101, p90 133. Dividing by 230
+       squeezed all of that into 0.35–0.58, where every layer gate was already
+       wide open and the music stopped answering the throttle. */
+    music.tick(clamp((kmh - 50) / 110, 0, 1), dt);
   }
 
   /* post */
