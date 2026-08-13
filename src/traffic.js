@@ -1,9 +1,48 @@
 import * as THREE from 'three';
 import { assets, neon } from './assets.js';
-import { mulberry32, clamp, damp } from './geo.js';
+import { mulberry32, clamp, damp, MeshBuilder } from './geo.js';
 import { BIOME, VIEW_DIST } from './constants.js';
 
 const CAR_PAINT = [0x101218, 0x1a1c22, 0x0d1420, 0x201418, 0x141a18];
+
+/**
+ * Wheels, plate and reflectors merged into one geometry per kind, so all the
+ * new detail costs three draw calls per car rather than a dozen.
+ */
+function carDetail(g, kind) {
+  const half = g.len / 2;
+  const axles = kind === 'truck' ? [-half + 1.6, half - 5.2, half - 3.4, half - 1.6]
+    : [-half + 1.1, half - 1.1];
+  const track = kind === 'truck' ? 1.12 : 0.82;
+  const r = kind === 'truck' ? 0.46 : 0.34;
+
+  const wheels = new MeshBuilder();
+  for (const z of axles) {
+    for (const dx of [-track, track]) {
+      // a short faceted cylinder lying on its side reads as a tyre at night
+      for (let i = 0; i < 8; i++) {
+        const a0 = (i / 8) * Math.PI * 2;
+        const a1 = ((i + 1) / 8) * Math.PI * 2;
+        const y0 = r + Math.sin(a0) * r, z0 = z + Math.cos(a0) * r;
+        const y1 = r + Math.sin(a1) * r, z1 = z + Math.cos(a1) * r;
+        wheels.quad(
+          { x: dx - 0.14, y: y0, z: z0 }, { x: dx + 0.14, y: y0, z: z0 },
+          { x: dx + 0.14, y: y1, z: z1 }, { x: dx - 0.14, y: y1, z: z1 }
+        );
+      }
+    }
+  }
+
+  const plate = new MeshBuilder();
+  plate.box(0, 0.5, half + 0.03, 0.42, 0.11, 0.02, 0);
+
+  const reflectors = new MeshBuilder();
+  for (const dx of [-track * 0.9, track * 0.9]) {
+    reflectors.box(dx, 0.42, half + 0.02, 0.16, 0.09, 0.02, 0);
+  }
+
+  return { wheels: wheels.build(), plate: plate.build(), reflectors: reflectors.build() };
+}
 
 /** Shared geometry — every car on the road is one of these three. */
 function carGeometries() {
@@ -15,6 +54,12 @@ function carGeometries() {
 }
 
 let GEOS = null;
+let DETAIL = null;
+const WHEEL_MAT = new THREE.MeshStandardMaterial({ color: 0x07080b, roughness: 0.92, metalness: 0.1 });
+/* A plate lamp is a 5-watt bulb behind a piece of plastic. Anything near the
+   bloom threshold turns it into a second headlight pointed at you. */
+const PLATE_MAT = new THREE.MeshBasicMaterial({ color: neon(0xd6c9a6, 0.34), toneMapped: false });
+const REFLECT_MAT = new THREE.MeshBasicMaterial({ color: neon(0xff2418, 0.85), toneMapped: false });
 
 export class Traffic {
   constructor(scene, road) {
@@ -22,6 +67,7 @@ export class Traffic {
     this.group = new THREE.Group();
     scene.add(this.group);
     GEOS ||= carGeometries();
+    DETAIL ||= Object.fromEntries(Object.entries(GEOS).map(([k, g]) => [k, carDetail(g, k)]));
     this.rnd = mulberry32(4242);
     this.cars = [];
     this.pool = { sedan: [], van: [], truck: [] };
@@ -61,6 +107,30 @@ export class Traffic {
     group.add(body, cabin);
 
     const halfLen = g.len / 2;
+    const d = DETAIL[kind];
+    const wheels = new THREE.Mesh(d.wheels, WHEEL_MAT);
+    const plate = new THREE.Mesh(d.plate, PLATE_MAT);         // the plate lamp, always on
+    const reflectors = new THREE.Mesh(d.reflectors, REFLECT_MAT); // catches your headlight
+    wheels.name = 'wheels'; plate.name = 'plate'; reflectors.name = 'reflectors';
+    group.add(wheels, plate, reflectors);
+
+    /* Someone is in there: a dashboard, seen through the back window. It has to
+       sit just *outside* the rear face of the cabin — anywhere inside and the
+       opaque roof occludes it entirely, which measured as exactly zero pixels.
+       Only the sedan has a rear window to see it through: the van's "cabin" is
+       a roof pod and the truck's is 5 m up the road, facing away. */
+    let cabinGlow = null;
+    if (kind === 'sedan') {
+      cabinGlow = a.glowSprite(0x4a7ad8, 0.7, 0.3);
+      cabinGlow.name = 'cabinGlow';
+      cabinGlow.position.set(
+        0,
+        body.position.y + g.cabinY,
+        g.cabinZ + g.cabin.parameters.depth / 2 + 0.05
+      );
+      group.add(cabinGlow);
+    }
+
     const glows = [];   // faded out at point-blank range so a close pass doesn't white out the screen
 
     /* tail lamps */
@@ -147,8 +217,21 @@ export class Traffic {
     glows.push(cone, smear);
     for (const o of glows) o.userData.baseOpacity = o.material.opacity;
 
+    /* indicators, so a car pulling over says so first */
+    const blinkers = { left: [], right: [] };
+    for (const side of [-1, 1]) {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(0.16, 0.1, 0.05),
+        new THREE.MeshBasicMaterial({ color: neon(0xffa01e, 2.4), toneMapped: false })
+      );
+      m.position.set(side * 0.9, body.position.y + 0.1, halfLen - 0.02);
+      m.visible = false;
+      group.add(m);
+      blinkers[side < 0 ? 'left' : 'right'].push(m);
+    }
+
     this.group.add(group);
-    return { group, kind, len: g.len, glows };
+    return { group, kind, len: g.len, glows, tailMat, blinkers, prevSpeed: 0 };
   }
 
   spawn(sBike, dir) {
@@ -186,6 +269,7 @@ export class Traffic {
   }
 
   update(dt, sBike, latBike, speedBike) {
+    this.blinkT = (this.blinkT || 0) + dt;
     const want = this.targetCount(this.road.biomeAt(sBike), this.road.remotenessAt(sBike));
 
     /* Cars used to drive straight through each other: nothing looked ahead, so
@@ -236,6 +320,21 @@ export class Traffic {
 
       const near = clamp((Math.abs(rel) - car.len * 0.5) / 12, 0, 1);
       for (const o of car.glows) o.material.opacity = o.userData.baseOpacity * near;
+
+      /* brake lights, now that cars actually slow down for each other */
+      const braking = car.prevSpeed - car.speed > 0.35 * dt * 60;
+      car.prevSpeed = car.speed;
+      car.tailMat.color.copy(neon(0xff1428, braking ? 6 : 2.6));
+
+      /* And indicators while they are moving across. The lamps live in the car's
+         own frame, and an oncoming car's group is turned around — so the road-space
+         direction has to be flipped back through car.dir or it signals the wrong way. */
+      const moving = (car.targetLat - car.lat) * car.dir;
+      const side = Math.abs(moving) > 0.25 ? (moving > 0 ? 'right' : 'left') : null;
+      const lit = side && (this.blinkT % 0.66) < 0.36;
+      for (const key of ['left', 'right']) {
+        for (const m of car.blinkers[key]) m.visible = !!lit && side === key;
+      }
 
       if (!car.passed && car.dir < 0 && rel < 6) {
         car.passed = true;
