@@ -20,6 +20,9 @@ import { launch, session, settle } from './session.mjs';
 
 const DIR = 'tests/golden';
 const sha = (b) => createHash('sha1').update(b).digest('hex');
+/* Fraction of the frame allowed to move by more than 8/255 before it counts as
+   a change. Raise it only with a picture in hand explaining why. */
+const TOLERANCE = Number(process.env.MR_VISUAL_TOLERANCE ?? 0.002);
 
 /* One per thing that has actually broken, plus one per biome. */
 export const SHOTS = [
@@ -89,17 +92,30 @@ export async function run({ update = false } = {}) {
         results.push({ name: `golden ${shot.name}`, pass: true, detail: 'byte-identical' });
         continue;
       }
-      writeFileSync(`${DIR}/${shot.name}.actual.png`, buf);
+      /* A different Chrome or a different software rasteriser will move a few
+         pixels without anything being wrong, so the gate is a fraction of the
+         frame rather than zero. Locally it is zero; this tolerance exists so
+         the baselines can travel to CI at all. */
       let detail = 'differs';
+      let pass = false;
       try {
         const d = await compare(page, buf.toString('base64'), want.toString('base64'));
-        detail = d.size
-          ? `${(100 * d.changed / d.total).toFixed(3)}% of pixels moved, worst ${d.worst}/255`
-          : 'size changed';
+        if (!d.size) {
+          detail = 'size changed';
+        } else {
+          const frac = d.changed / d.total;
+          pass = frac < TOLERANCE;
+          detail = `${(100 * frac).toFixed(3)}% of pixels moved, worst ${d.worst}/255`;
+        }
       } catch (e) {
         detail = `differs (${e.message})`;
       }
-      results.push({ name: `golden ${shot.name}`, pass: false, detail: `${detail} — wrote ${shot.name}.actual.png` });
+      if (!pass) writeFileSync(`${DIR}/${shot.name}.actual.png`, buf);
+      results.push({
+        name: `golden ${shot.name}`,
+        pass,
+        detail: detail + (pass ? '' : ` — wrote ${shot.name}.actual.png`),
+      });
     }
     results.push({ name: 'no page errors', pass: errors.length === 0, detail: errors.slice(0, 2).join(' | ') });
   } finally {

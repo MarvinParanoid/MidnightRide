@@ -1,0 +1,85 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The generators are pure functions. No browser, no server, done in a second —
+  # so a broken arp figure or a clumping deck fails before anything else starts.
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test -- music
+
+  # Everything that needs the game running. Software rasterised, so it is slow
+  # but it does not need a GPU on the runner.
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # The runner images ship Google Chrome, but say so out loud and fail here
+      # with a sentence rather than inside puppeteer with a stack trace.
+      - name: Locate Chrome
+        run: |
+          for p in /usr/bin/google-chrome /usr/bin/google-chrome-stable /usr/bin/chromium; do
+            if [ -x "$p" ]; then echo "MR_CHROME=$p" >> "$GITHUB_ENV"; echo "using $p"; exit 0; fi
+          done
+          echo "no Chrome on this runner"; exit 1
+
+      # The suite drives the real dev server rather than a built copy, which is
+      # the same thing a person testing by hand would be looking at.
+      - name: Start the dev server
+        run: |
+          npm run dev > /tmp/vite.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:5173/ >/dev/null && exit 0
+            sleep 1
+          done
+          echo "dev server never came up"; cat /tmp/vite.log; exit 1
+
+      - name: Determinism
+        run: npm test -- determinism
+
+      - name: World invariants
+        run: npm test -- world
+
+      - name: Frame budgets
+        run: npm test -- budgets
+
+      # Runs last: it is the one whose baselines were recorded on a different
+      # machine, so if anything here is going to need a tolerance change it is
+      # this, and the other suites should have reported first.
+      - name: Golden frames
+        run: npm test -- visual
+
+      - name: Keep the frames that failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-actual
+          path: tests/golden/*.actual.png
+          if-no-files-found: ignore
+
+      - name: Dev server log
+        if: failure()
+        run: cat /tmp/vite.log

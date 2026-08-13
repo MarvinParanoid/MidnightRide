@@ -14,9 +14,20 @@
  * under test is the shipping build.
  */
 import puppeteer from 'puppeteer-core';
+import { existsSync } from 'node:fs';
 
 export const URL = process.env.MR_URL || 'http://127.0.0.1:5173/';
-export const CHROME = process.env.MR_CHROME || '/usr/bin/google-chrome-stable';
+
+/* Arch calls it google-chrome-stable, the GitHub runners call it google-chrome,
+   and a Chrome installed by an action lands somewhere else again. Look rather
+   than assume, so the suite needs no configuration on either. */
+export const CHROME = process.env.MR_CHROME || [
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/snap/bin/chromium',
+].find((p) => existsSync(p)) || '/usr/bin/google-chrome-stable';
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** The frozen wall clock: a Tuesday in October, 23:40 local. */

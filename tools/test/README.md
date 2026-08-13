@@ -9,6 +9,23 @@ npm test -- visual --update    # re-record the golden frames
 
 Exits non-zero on any failure.
 
+`MR_CHROME` overrides the browser path, `MR_URL` the server, and
+`MR_VISUAL_TOLERANCE` the fraction of a frame allowed to move before a golden
+counts as changed (default 0.002).
+
+## In CI
+
+`.github/workflows/test.yml` runs `music` on its own — a second, no browser — and
+everything else in a second job against a real dev server, software rasterised
+so no GPU is needed. Frames that fail a golden comparison are uploaded as an
+artifact, so the picture can be looked at without reproducing the run.
+
+The one thing that may need attention on the first CI run: the baselines were
+recorded on a different machine and a different Chrome. Locally frames come out
+byte-identical; across builds a few pixels may move. That is what the tolerance
+is for, and if the first run reports a fraction just over it, raise
+`MR_VISUAL_TOLERANCE` — but look at the uploaded frame first.
+
 ## Why these
 
 Every assertion here is a bug that shipped and was found by a person noticing
