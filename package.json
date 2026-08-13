@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "record": "node tools/record.mjs",
     "build:itch": "node tools/build-itch.mjs",
-    "shots": "node tools/shots.mjs"
+    "shots": "node tools/shots.mjs",
+    "test": "node tools/test/run.mjs"
   },
   "dependencies": {
     "three": "^0.185.1"

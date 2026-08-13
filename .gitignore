@@ -4,3 +4,4 @@ dist-itch
 .record-frames
 .wrangler
 *.zip
+tests/golden/*.actual.png
