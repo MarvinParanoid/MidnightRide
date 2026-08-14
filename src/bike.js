@@ -284,12 +284,13 @@ export class Bike {
     this.fill = new THREE.PointLight(0x9fb8ff, 4.5, 11, 1.7);
     this.fill.position.set(0.6, 2.6, 1.2);
     this.lean.add(this.fill);
-    /* Lifted off the road and pulled in close. Sitting at tarmac level two
-       metres ahead it stopped reading as bounce and became a spotlight pointed
-       at the ground — obvious once the road itself got darker. */
-    this.bounce = new THREE.PointLight(0xffc98a, 0.26, 2.8, 2.0);
-    this.bounce.position.set(0, 0.52, -1.15);
-    this.lean.add(this.bounce);
+    /* There was a warm bounce light here, meant to be the tarmac throwing the
+       headlight back at the rider. It was reported as too bright three times,
+       survived two rounds of dimming, and measured as very nearly the whole of
+       the warm blob under the back wheel: with it off that patch fell 16.5 to
+       11.7, and hiding the entire bike only took it to 11.5. The rider is built
+       properly now and the cool fill above him does the reading; the bounce was
+       only ever a stand-in for geometry that did not exist yet. */
 
     this.beams = [beam(48, 5.6, 0.022, 0xfff1de), beam(28, 2.4, 0.02, 0xffe9c8)];
     for (const b of this.beams) {
@@ -462,7 +463,7 @@ export class Bike {
 
   updateSpray(dt, speed, rain) {
     const amount = clamp(speed / 30, 0, 1) * rain;
-    this.sprayMat.opacity = amount * 0.07;
+    this.sprayMat.opacity = amount * 0.04;
     if (amount <= 0.01) return;
     const p = this.spray.geometry.attributes.position;
     const c = this.spray.geometry.attributes.color;

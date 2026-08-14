@@ -255,17 +255,35 @@ const SSRShader = {
 
 /** Lay the half-resolution reflection over the frame it was computed from. */
 const SSRCompositeShader = {
-  uniforms: { tDiffuse: { value: null }, tRefl: { value: null } },
+  uniforms: { tDiffuse: { value: null }, tRefl: { value: null }, uTexel: { value: new THREE.Vector2() } },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
   `,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse, tRefl;
+    uniform vec2 uTexel;
     varying vec2 vUv;
     void main() {
-      vec4 r = texture2D(tRefl, vUv);
-      gl_FragColor = vec4(mix(texture2D(tDiffuse, vUv).rgb, r.rgb, r.a), 1.0);
+      /* Gather rather than point-sample. One ray per pixel finds a light or it
+         does not, so a neon band reflects as a scatter of lit pixels among dark
+         ones — the speckle that shows along a bridge and as red dots on the
+         bike. Averaging a small neighbourhood fills the gaps between hits, and
+         weighting the colour by each tap's own strength keeps the misses from
+         washing the hits out. A reflection on wet tarmac is soft anyway. */
+      vec3 sum = vec3(0.0);
+      float wsum = 0.0, a = 0.0;
+      for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+          vec4 t = texture2D(tRefl, vUv + vec2(float(x), float(y)) * uTexel * 1.5);
+          sum += t.rgb * t.a;
+          wsum += t.a;
+          a += t.a;
+        }
+      }
+      a /= 9.0;
+      vec3 refl = wsum > 0.0001 ? sum / wsum : vec3(0.0);
+      gl_FragColor = vec4(mix(texture2D(tDiffuse, vUv).rgb, refl, a), 1.0);
     }
   `,
 };
@@ -305,6 +323,7 @@ class SSRPass extends Pass {
     this.target.setSize(sw, sh);
     // the march walks pixels, so it has to know how many there are
     this.material.uniforms.uRes.value.set(sw, sh);
+    this.composite.uniforms.uTexel.value.set(1 / sw, 1 / sh);
   }
 
   render(renderer, writeBuffer, readBuffer) {
