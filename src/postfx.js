@@ -94,6 +94,7 @@ const SSRShader = {
     uStrength: { value: 0.55 },
     uWet: { value: 0 },
     uSteps: { value: 20 },
+    uThickness: { value: 0.55 },
     uDebug: { value: 0 },
   },
   vertexShader: /* glsl */ `
@@ -108,7 +109,7 @@ const SSRShader = {
     uniform sampler2D tDepth;
     uniform mat4 uProj, uInvProj;
     uniform vec3 uUpView;
-    uniform float uStrength, uWet, uSteps, uDebug;
+    uniform float uStrength, uWet, uSteps, uThickness, uDebug;
     varying vec2 vUv;
 
     vec3 viewPos(vec2 uv) {
@@ -147,7 +148,11 @@ const SSRShader = {
 
       vec3 V = normalize(P);
       vec3 R = reflect(V, n);
-      if (R.z > 0.0) { gl_FragColor = vec4(0.0); return; }   // pointing behind the eye
+      /* A ray coming back towards the eye can only ever hit something already
+         in front of what it is reflecting, so it is fade rather than cut: a
+         hard cut there is a visible line across the road. */
+      float towardsEye = 1.0 - smoothstep(-0.15, 0.05, R.z);
+      if (towardsEye < 0.01) { gl_FragColor = vec4(0.0); return; }
 
       /* Start each ray a random fraction of a step along. Without it every ray
          in a neighbourhood crosses the surface at the same step index and the
@@ -158,6 +163,7 @@ const SSRShader = {
       float stepLen = 0.35 + (-P.z) * 0.02;
       vec3 pos = P + n * 0.06 + R * stepLen * dither;
       float found = 0.0;
+      float travelled = 0.0;
       vec2 hitUv = vec2(0.0);
       vec3 prev = pos;
 
@@ -165,13 +171,17 @@ const SSRShader = {
         if (float(i) >= uSteps) break;
         prev = pos;
         pos += R * stepLen;
+        travelled += stepLen;
         stepLen *= 1.16;
         vec4 clip = uProj * vec4(pos, 1.0);
         vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
         if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
         float sceneZ = viewPos(uv).z;
         float behind = sceneZ - pos.z;           // >0 when the ray is behind the surface
-        if (behind > 0.0 && behind < stepLen * 2.2) {
+        /* A fixed thickness, not one that grows with the stride. Tying it to
+           the step made distant hits accept anything within metres of the
+           surface, which is what stretches a reflection into a smear. */
+        if (behind > 0.0 && behind < uThickness + travelled * 0.03) {
           /* Halve back and forth a few times: the coarse step says which stride
              the crossing is in, this says where in it. */
           vec3 lo = prev, hi = pos;
@@ -189,6 +199,12 @@ const SSRShader = {
       }
 
       if (found < 0.5) { gl_FragColor = vec4(0.0); return; }
+      /* The further a ray had to travel to find anything, the less it is worth
+         trusting — and the reflection has to thin out rather than stop dead. */
+      /* Long reflections are the point on a wet road — a lamp fifty metres off
+         streaks all the way back to you. Fading them out at fourteen metres
+         removed the artefacts and the subject with them. */
+      float reach = 1.0 - smoothstep(45.0, 110.0, travelled);
       {
         vec3 refl = texture2D(tDiffuse, hitUv).rgb;
         /* Fade at the edges of the screen, where the information simply is not
@@ -196,7 +212,7 @@ const SSRShader = {
         vec2 e = abs(hitUv - 0.5) * 2.0;
         float edge = (1.0 - smoothstep(0.75, 1.0, max(e.x, e.y)));
         float fresnel = pow(1.0 - max(0.0, dot(-V, n)), 2.4);
-        float k = clamp(uStrength * wet * floorness * fresnel * edge, 0.0, 0.85);
+        float k = clamp(uStrength * wet * floorness * fresnel * edge * reach * towardsEye, 0.0, 0.85);
         gl_FragColor = vec4(refl, k);
       }
     }
