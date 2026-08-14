@@ -259,15 +259,15 @@ function streetLamp(ctx, s, side) {
   ctx.halo(new THREE.Vector3(headP.x, armY - 0.2, headP.z), LAMP_WARM, 7.5, 0.42);
 
   /* Pool of light on the wet tarmac, stretched down the road.
-     It has to stay on the tarmac. Fourteen metres wide, centred 5.7 m out, it
-     reached 12.7 m from the centreline — four and a half metres past the edge
-     of the shoulder and over the verge, which is a separate mesh sitting a
-     little higher. The decal went under it and the depth test cut the light
-     off along a dead straight line running down the road: the hard edge under
-     every lamp. The carriageway plus its shoulder is 8.2 m, so the pool ends
-     there too. */
-  const p = ctx.at(s, lat - side * 2.2, 0.03);
-  ctx.pool(LAMP_WARM, 0.62).decal(p, ctx.right(s), ctx.forward(s), 10, 24, 0.03);
+     Back to where it was. An earlier attempt to keep it clear of the verge
+     narrowed it and lifted it a centimetre, on a diagnosis that could not be
+     confirmed by measurement — and it went in bundled with the light shafts,
+     which is how a change nobody had verified ended up being blamed on a
+     feature. The lift in particular put this quad within a centimetre of the
+     road paint, which at any distance is inside what the depth buffer can
+     tell apart. */
+  const p = ctx.at(s, lat - side * 3.0, 0.02);
+  ctx.pool(LAMP_WARM, 0.62).decal(p, ctx.right(s), ctx.forward(s), 14, 24, 0.02);
 
   /* The shaft of air the lamp lights up. Built into the chunk like everything
      else, so it costs one draw call for every lamp in view rather than one
@@ -275,7 +275,14 @@ function streetLamp(ctx, s, side) {
   const shaft = ctx.shaftBuilder();
   const top = new THREE.Vector3(headP.x, armY - 0.3, headP.z);
   const SEG = 10;
-  const rTop = 0.55, rBot = 3.4, drop = armY - 0.5;
+  /* A length, not a coordinate. This was `armY - 0.5`, which is an absolute
+     height in chunk-local space, and it was then subtracted as if it were a
+     distance. That only lands correctly while the chunk's origin happens to sit
+     at road level — and origins are rebased every few kilometres and the road
+     climbs, so on plenty of chunks the cone finished metres above the tarmac,
+     and on others it drove straight through it. */
+  const rTop = 0.55, rBot = 3.4;
+  const drop = (armY - 0.3) - (base.y + 0.15);   // lamp head down to just above the road
   for (let i = 0; i < SEG; i++) {
     const a0 = (i / SEG) * Math.PI * 2;
     const a1 = ((i + 1) / SEG) * Math.PI * 2;

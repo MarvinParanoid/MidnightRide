@@ -340,7 +340,18 @@ export class Road {
     /* ── paint ───────────────────────────────────────────── */
     const white = ctx.get('paintWhite', a.paintWhite);
     const yellow = ctx.get('paintYellow', a.paintYellow);
-    const paintY = 0.015;
+    /* Fifteen millimetres was not enough clearance. A perspective depth buffer
+       resolves about z^2 / (near * 2^bits) at distance z, so with a near plane
+       of 0.4 m the finest step it can tell apart is already millimetres at
+       fifty metres and centimetres beyond a couple of hundred — and where the
+       step is smaller than that, the road and the paint on it win alternate
+       pixels. That reads as the paint breaking into black dashes along a band
+       at a fixed distance, which is exactly the arc that shows up under street
+       lamps. Multisampling hides it, which is why it only appeared on the
+       profile that has none. */
+    /* Back to a small lift now that the depth offset does the real work: four
+       centimetres of paint standing off the tarmac is visible from the saddle. */
+    const paintY = 0.018;
     this.solidLine(white, sStart, sStart + CHUNK_LEN, -ROAD_HALF + 0.35, 0.14, paintY, origin);
     this.solidLine(white, sStart, sStart + CHUNK_LEN, ROAD_HALF - 0.35, 0.14, paintY, origin);
     this.solidLine(yellow, sStart, sStart + CHUNK_LEN, -0.2, 0.12, paintY, origin);

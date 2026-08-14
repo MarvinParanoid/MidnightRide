@@ -281,8 +281,19 @@ export function assets() {
            seam down one side of the cone and left the opposite side at full
            strength — the straight hard edge that gave the whole thing away as
            a piece of geometry rather than lit air. */
-        float face = pow(abs(dot(normalize(vNormal), normalize(vView))), 0.55);
-        gl_FragColor = vec4(color, down * face * opacity);
+        /* normalize() of a zero vector is a division by zero, and the result is
+           NaN. A cone whose top and bottom rings coincide has zero-area faces,
+           computeVertexNormals() hands those a zero normal, and the NaN lands in
+           the alpha — where this GPU flushes it to nothing and another paints
+           black. That is what the ring of dark dashes under every lamp was, and
+           it cost a day precisely because it could not be reproduced here. The
+           geometry no longer degenerates, but nothing downstream should be able
+           to make a shader produce black either. */
+        float nl = length(vNormal), vl = length(vView);
+        float face = nl > 1e-5 && vl > 1e-5
+          ? pow(abs(dot(vNormal / nl, vView / vl)), 0.55)
+          : 0.0;
+        gl_FragColor = vec4(color, max(0.0, down * face * opacity));
       }
     `,
     transparent: true,
@@ -331,14 +342,37 @@ export function assets() {
       emissive: 0x050b1c, emissiveIntensity: 1, envMapIntensity: 2.2,
     }),
 
-    /* paint — unlit so it survives the dark and feeds the bloom a little */
-    paintWhite: new THREE.MeshBasicMaterial({ color: 0x8d97ab, toneMapped: false }),
-    paintYellow: new THREE.MeshBasicMaterial({ color: 0x9b8140, toneMapped: false }),
+    /* Paint — unlit so it survives the dark and feeds the bloom a little.
+       Offset in the depth buffer's own units rather than in metres. Road paint
+       is a coplanar surface, and lifting it by a fixed distance cannot work:
+       the buffer's resolution falls off as the square of the range, so any gap
+       that is comfortable up close is below the noise floor further out, and
+       the road and its markings then win alternate pixels — the paint breaks
+       into black dashes along a band at a fixed distance. Polygon offset moves
+       the paint by a fraction of whatever the local depth step happens to be,
+       which is the same everywhere. */
+    paintWhite: new THREE.MeshBasicMaterial({
+      color: 0x8d97ab, toneMapped: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6,
+    }),
+    paintYellow: new THREE.MeshBasicMaterial({
+      color: 0x9b8140, toneMapped: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6,
+    }),
 
-    /* emissive building windows */
+    /* Emissive building windows.
+       Additive, and that is not a stylistic choice. The texture is lit windows
+       drawn on a black field, and with ordinary blending a coarse mip level
+       averages that into dark grey at partial opacity — so a distant or
+       edge-on facade stopped being windows and became a sheet of tinted glass
+       laid over whatever was behind it. That is the dark translucent rectangle
+       that has been turning up next to lamps. Lit windows add light; they do
+       not occlude, and an averaged black field adds nothing. */
     windows: new THREE.MeshBasicMaterial({
       map: windows,
       transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
       toneMapped: false,
       side: THREE.DoubleSide,
       color: 0xffffff,

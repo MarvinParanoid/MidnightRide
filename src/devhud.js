@@ -10,7 +10,7 @@
  *   "is something leaking?"                 — textures and geometries over time
  *   "why is the music thin just here?"      — station, energy and layer gates
  *
- * Off unless asked for: `?dev=1`, or F3 at any time. Never in stream mode — the
+ * Off unless asked for: `?dev=1`, or the backquote key at any time. Never in stream mode — the
  * one thing a viewer must not see is the instrumentation.
  */
 const FRAMES = 120;         // about two seconds of history in the graph

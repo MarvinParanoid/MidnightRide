@@ -39,6 +39,15 @@ export const TIERS = [
 
 /** Where to start before we know anything. Phones start low; everything else high. */
 export function detectQuality() {
+  /* ?q=low pins the starting profile. The renderer is built from it — the
+     multisampling of the main buffer in particular is fixed at construction —
+     so stepping the guard down afterwards does not produce the same renderer a
+     weak machine gets. Without this, a fault that only appears on the low
+     profile cannot be reproduced anywhere but on the machine that reported it. */
+  const asked = new URLSearchParams(location.search).get('q');
+  const named = TIERS.findIndex((t) => t.name === asked);
+  if (named >= 0) return { index: named, ...TIERS[named] };
+
   const weak = isTouchDevice || (navigator.hardwareConcurrency || 8) <= 2;
   const index = weak ? 2 : 0;
   return { index, ...TIERS[index] };

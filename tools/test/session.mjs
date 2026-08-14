@@ -48,7 +48,7 @@ export async function launch() {
  * Open the game with both sources of chance pinned.
  * Returns the page plus a live array of anything the page logged as an error.
  */
-export async function session(browser, { width = 1152, height = 648, seed = 20260813 } = {}) {
+export async function session(browser, { width = 1152, height = 648, seed = 20260813, tier = null } = {}) {
   const page = await browser.newPage();
   await page.setViewport({ width, height, deviceScaleFactor: 1 });
 
@@ -97,7 +97,12 @@ export async function session(browser, { width = 1152, height = 648, seed = 2026
     Date = Frozen;
   }, seed, FROZEN_TIME);
 
-  await page.goto(URL, { waitUntil: 'networkidle0' });
+  /* A tier asked for here is applied before the renderer exists, so the whole
+     chain — multisampling included — is built the way that profile builds it.
+     Pinning it afterwards only changes the settings that can be changed later,
+     which is why a low-profile fault was not reproducible from this harness. */
+  await page.goto(tier ? `${URL}${URL.includes('?') ? '&' : '?'}q=${tier}` : URL,
+    { waitUntil: 'networkidle0' });
   await page.waitForFunction(() => window.__mr && window.__mr.record.active, { timeout: 20000 });
   await page.mouse.click(width / 2, height / 2);   // past the title screen
   /* Quality is chosen from the machine, and the machine is not the same one
@@ -106,7 +111,7 @@ export async function session(browser, { width = 1152, height = 648, seed = 2026
      cut-down profile — half the rain, a smaller bloom buffer, no MSAA — which
      measured as 14.4% of the frame moving against a baseline recorded on a
      sixteen-core box. Pin it, like the clocks. */
-  await page.evaluate(() => window.__mr.guard.step(0));
+  if (!tier) await page.evaluate(() => window.__mr.guard.step(0));
 
   /* The audio schedulers run off the audio clock, which is wall time, and they
      draw from the same Math.random stream as everything else — so how many

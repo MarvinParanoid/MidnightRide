@@ -39,7 +39,11 @@ renderer.info.autoReset = false;
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x06070f, 0.0066);
 
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.4, 5200);
+/* The near plane sets the whole depth buffer's precision, and it costs nothing
+   to move: the closest thing the camera ever sees is the rider's own shoulder
+   in first person, about a metre away. Going from 0.4 to 0.7 buys most of a
+   bit of depth precision everywhere in the scene. */
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.7, 5200);
 camera.position.set(0, 3, 8);
 
 const { composer, bloom, grade, ssr } = createComposer(renderer, scene, camera, quality);
@@ -105,6 +109,11 @@ const stream = new StreamMode();
 /* Instrumentation, never on a broadcast: ?dev=1 or F3. */
 const dev = new DevHud();
 const gpu = new GpuTime(renderer);
+/* What the F-keys have switched off. Applied every frame because the road is
+   rebuilt as you ride and new chunks would otherwise come back lit. */
+const debugOff = { shafts: false, decals: false };
+let decalsHidden = false;
+let shaftsHidden = false;
 if (stream.active) dev.on = false;
 const pacer = new StreamPacer();
 if (stream.active) {
@@ -305,13 +314,28 @@ async function begin() {
 }
 document.addEventListener('pointerdown', begin, { once: true });
 document.addEventListener('keydown', (e) => {
-  if (e.code === 'F3' && !stream.active) { dev.toggle(); return; }
-  /* An A/B you can do with your eyes: the reflection pass on and off, in place,
-     without reloading or editing anything. */
-  if (e.code === 'F4' && !stream.active) {
-    ssr.enabled = !ssr.enabled;
-    hud.toast(ssr.enabled ? 'REFLECTIONS ON' : 'REFLECTIONS OFF');
-    return;
+  /* Backquote and the digits, not the function keys: F3 is find, F5 is reload
+     and F6 is the address bar, so half the debug controls fought the browser
+     for their own keypress. Nothing in the game uses these. */
+  if (!stream.active) {
+    if (e.code === 'Backquote') { dev.toggle(); return; }
+    if (e.code === 'Digit1') {
+      ssr.enabled = !ssr.enabled;
+      hud.toast(ssr.enabled ? 'REFLECTIONS ON' : 'REFLECTIONS OFF');
+      return;
+    }
+    /* These two hide the geometry, not the light. Zeroing a light that is
+       already off on a dry night tests nothing, which cost a day. */
+    if (e.code === 'Digit2') {
+      debugOff.shafts = !debugOff.shafts;
+      hud.toast(debugOff.shafts ? 'LIGHT SHAFTS OFF' : 'LIGHT SHAFTS ON');
+      return;
+    }
+    if (e.code === 'Digit3') {
+      debugOff.decals = !debugOff.decals;
+      hud.toast(debugOff.decals ? 'ROAD LIGHT OFF' : 'ROAD LIGHT ON');
+      return;
+    }
   }
   if (!running && (e.code === 'Space' || e.code === 'Enter' || e.code === 'KeyW')) begin();
 });
@@ -652,7 +676,31 @@ function frame() {
   grade.uniforms.uWet.value = rainAmount * clamp(state.v / 40, 0, 1) * 0.55;
   /* Light shafts need something in the air. Rain gives it; a clear night does
      not, and a shaft hanging under a lamp on a dry road is a cone of plastic. */
+  /* F5 hides the geometry, not just the light. Zeroing the opacity tested
+     nothing on a dry night, when the shafts are already invisible — which is
+     how they stayed a suspect for a day. */
   a.shaft.uniforms.opacity.value = Math.pow(rainAmount, 0.8) * 0.1 * (1 - state.enclosure * 0.8);
+  if (debugOff.shafts !== shaftsHidden) {
+    shaftsHidden = debugOff.shafts;
+    road.group.traverse((o) => {
+      if (o.isMesh && o.material === a.shaft) o.visible = !shaftsHidden;
+    });
+  } else if (shaftsHidden) {
+    road.group.traverse((o) => { if (o.isMesh && o.material === a.shaft) o.visible = false; });
+  }
+  if (debugOff.decals !== decalsHidden) {
+    decalsHidden = debugOff.decals;
+    road.group.traverse((o) => {
+      if (o.isMesh && o.material && o.material.uniforms && o.material.uniforms.radial) {
+        o.userData.debugHidden = decalsHidden;
+        o.visible = !decalsHidden;
+      }
+    });
+  } else if (decalsHidden) {
+    road.group.traverse((o) => {
+      if (o.isMesh && o.material && o.material.uniforms && o.material.uniforms.radial) o.visible = false;
+    });
+  }
 
   /* Reflections need the camera as it is this frame, and only appear on a road
      that is actually wet — a dry one is not a mirror. */
@@ -685,7 +733,7 @@ function frame() {
       quality: `${guard.name}  ${guard.changes} change${guard.changes === 1 ? '' : 's'}`,
       ssr: ssr.enabled
         ? `${ssr.material.uniforms.uSteps.value} steps @ ${ssr.target.width}x${ssr.target.height}`
-        : 'off  (F4)',
+        : 'off  (1)',
       /* Configured is not the same as working. This is the fraction of the road
          that actually found something to reflect: zero means the pass is doing
          nothing, whatever the line above says. */
@@ -799,4 +847,5 @@ window.__mr = {
   get engine() { return engine; },
   get music() { return music; },
   get trafficSound() { return trafficSound; },
+  get assets() { return a; },
 };
