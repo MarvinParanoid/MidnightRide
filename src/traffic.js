@@ -44,6 +44,21 @@ function carDetail(g, kind) {
   return { wheels: wheels.build(), plate: plate.build(), reflectors: reflectors.build() };
 }
 
+/**
+ * Where the lamps go on each kind.
+ *
+ * They used to be fixed numbers — 0.72 across, and a height measured from the
+ * centre of the body. That is fine on a saloon and absurd on a lorry: a body
+ * three metres tall put its headlights 1.9 m up and 1.4 m apart, halfway up the
+ * front of a twelve-metre box. Lamps belong at a lamp's height and out near the
+ * corners, and a lorry's are on the cab, which sticks out ahead of the trailer.
+ */
+const LAMPS = {
+  sedan: { y: 0.62, x: 0.66, front: 0, marker: 0 },
+  van: { y: 0.74, x: 0.78, front: 0, marker: 0 },
+  truck: { y: 0.95, x: 1.02, front: 0.6, marker: 2.9 },
+};
+
 /** Shared geometry — every car on the road is one of these three. */
 function carGeometries() {
   return {
@@ -95,10 +110,18 @@ export class Traffic {
     const g = GEOS[kind];
     const rnd = this.rnd;
     const group = new THREE.Group();
+    /* A saloon is polished metal; a trailer is a painted box or a curtain, and
+       giving it the same finish made a two-and-a-half metre flat wall act as a
+       mirror — your headlight came back off it as a white rectangle that filled
+       the road ahead. Finish belongs to the kind of vehicle. */
+    const FINISH = {
+      sedan: { roughness: 0.24, metalness: 0.85 },
+      van: { roughness: 0.45, metalness: 0.5 },
+      truck: { roughness: 0.72, metalness: 0.15 },
+    }[kind];
     const paint = new THREE.MeshStandardMaterial({
       color: CAR_PAINT[(rnd() * CAR_PAINT.length) | 0],
-      roughness: 0.24,
-      metalness: 0.85,
+      ...FINISH,
     });
     const body = new THREE.Mesh(g.body, paint);
     body.position.y = g.body.parameters.height / 2 + 0.32;
@@ -133,11 +156,13 @@ export class Traffic {
 
     const glows = [];   // faded out at point-blank range so a close pass doesn't white out the screen
 
+    const L = LAMPS[kind];
+
     /* tail lamps */
     const tailMat = new THREE.MeshBasicMaterial({ color: neon(0xff1428, 2.6), toneMapped: false });
-    for (const dx of [-0.72, 0.72]) {
+    for (const dx of [-L.x, L.x]) {
       const t = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.06), tailMat);
-      t.position.set(dx, body.position.y + 0.12, halfLen);
+      t.position.set(dx, L.y, halfLen);
       group.add(t);
       const s = a.glowSprite(0xff1428, 1.5, 0.6);
       s.position.copy(t.position);
@@ -145,13 +170,14 @@ export class Traffic {
       glows.push(s);
     }
 
-    /* head lamps */
-    for (const dx of [-0.68, 0.68]) {
+    /* head lamps — on the cab, which on a lorry is ahead of the trailer */
+    for (const dx of [-L.x, L.x]) {
       const s = a.glowSprite(0xfff0d4, 2.6, 0.95);
-      s.position.set(dx, body.position.y + 0.05, -halfLen);
+      s.position.set(dx, L.y, -halfLen - L.front);
       group.add(s);
       glows.push(s);
     }
+
     const cone = new THREE.Mesh(
       new THREE.ConeGeometry(3.4, 30, 12, 1, true),
       new THREE.MeshBasicMaterial({
@@ -167,15 +193,23 @@ export class Traffic {
     );
     cone.geometry.rotateX(Math.PI / 2);
     cone.geometry.translate(0, 0, -15);
-    cone.position.set(0, body.position.y, -halfLen);
+    cone.position.set(0, L.y, -halfLen - L.front);
     group.add(cone);
 
-    /* truck marker lights */
-    if (kind === 'truck') {
-      const m = new THREE.MeshBasicMaterial({ color: neon(0xffa02a, 2.2), toneMapped: false });
+    /* Outline lamps: at night a row of little points along the top is most of
+       what tells you the thing ahead is enormous. Red facing back, amber on the
+       cab roof — the way a lorry is actually lit, and the way you read one. */
+    if (L.marker > 0) {
+      const back = new THREE.MeshBasicMaterial({ color: neon(0xff2418, 2.0), toneMapped: false });
+      const front = new THREE.MeshBasicMaterial({ color: neon(0xffa02a, 2.2), toneMapped: false });
       for (let i = -2; i <= 2; i++) {
-        const q = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.06), m);
-        q.position.set(i * 0.5, 3.5, halfLen - 0.05);
+        const q = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.06), back);
+        q.position.set(i * 0.5, L.marker, halfLen - 0.05);
+        group.add(q);
+      }
+      for (const dx of [-0.85, -0.3, 0.3, 0.85]) {
+        const q = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.09, 0.06), front);
+        q.position.set(dx, body.position.y + g.cabinY + 0.85, g.cabinZ - 1.1);
         group.add(q);
       }
     }
@@ -224,7 +258,7 @@ export class Traffic {
         new THREE.BoxGeometry(0.16, 0.1, 0.05),
         new THREE.MeshBasicMaterial({ color: neon(0xffa01e, 2.4), toneMapped: false })
       );
-      m.position.set(side * 0.9, body.position.y + 0.1, halfLen - 0.02);
+      m.position.set(side * L.x * 1.25, L.y + 0.02, halfLen - 0.02);
       m.visible = false;
       group.add(m);
       blinkers[side < 0 ? 'left' : 'right'].push(m);
