@@ -24,6 +24,7 @@ import { clamp, damp, smoothstep } from './geo.js';
 import { assets } from './assets.js';
 import { telemetry } from './telemetry.js';
 import { DevHud } from './devhud.js';
+import { GpuTime } from './gputime.js';
 
 /* ── renderer ──────────────────────────────────────────────── */
 const canvas = document.getElementById('scene');
@@ -103,6 +104,7 @@ const photo = new PhotoMode({ camera, renderer, scene, composer, canvas });
 const stream = new StreamMode();
 /* Instrumentation, never on a broadcast: ?dev=1 or F3. */
 const dev = new DevHud();
+const gpu = new GpuTime(renderer);
 if (stream.active) dev.on = false;
 const pacer = new StreamPacer();
 if (stream.active) {
@@ -659,7 +661,11 @@ function frame() {
   grade.uniforms.uGrain.value = (state.photo ? 0.006 : 0.014) * (record.active ? record.grain : 1);
 
   assets().glowField.update(scene);
+  /* Only while the panel is open: a timer query is cheap but not free, and a
+     player who never opens it should not pay for the instrumentation. */
+  if (dev.on) gpu.begin();
   composer.render();
+  if (dev.on) gpu.end();
 
   /* After the render, not before: renderer.info is reset at the top of the
      frame, so reading it earlier reports the previous frame as zero. */
@@ -670,6 +676,9 @@ function frame() {
       /* The worst tenth of frames, not the average: a stutter you can feel is
          invisible in a mean. */
       fps: `${fps.toFixed(0)}  now ${(dt * 1000).toFixed(1)} ms  worst ${(worst * 1000).toFixed(1)} ms`,
+      /* What the GPU itself spent, not what the clock says: the wall clock
+         measures when the calls were queued, which is a different thing. */
+      gpu: gpu.supported ? `${gpu.ms.toFixed(2)} ms` : 'no timer query in this browser',
       quality: `${guard.name}  ${guard.changes} change${guard.changes === 1 ? '' : 's'}`,
       ssr: ssr.enabled
         ? `${ssr.material.uniforms.uSteps.value} steps @ ${ssr.target.width}x${ssr.target.height}`
