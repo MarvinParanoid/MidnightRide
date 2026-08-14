@@ -398,10 +398,17 @@ class StableBloom extends Pass {
     this.bloom = bloom;
     this.keep = keep;
     const opts = { type: THREE.HalfFloatType, depthBuffer: false };
-    this.lit = new THREE.WebGLRenderTarget(size.x, size.y, opts);      // picture + bloom
+    this.lit = new THREE.WebGLRenderTarget(size.x, size.y, opts);      // picture alone
+    /* The history is a glow, and a glow has no detail worth keeping at full
+       resolution — it is the blurriest thing in the frame by construction. Half
+       size costs a quarter as much to write and read, and the bilinear filter
+       on the way back out is doing the same job the blur already did. */
+    this.histScale = 0.5;
+    const hw = Math.max(2, Math.floor(size.x * this.histScale));
+    const hh = Math.max(2, Math.floor(size.y * this.histScale));
     this.hist = [
-      new THREE.WebGLRenderTarget(size.x, size.y, opts),
-      new THREE.WebGLRenderTarget(size.x, size.y, opts),
+      new THREE.WebGLRenderTarget(hw, hh, opts),
+      new THREE.WebGLRenderTarget(hw, hh, opts),
     ];
     this.flip = 0;
     this.primed = false;
@@ -451,8 +458,10 @@ class StableBloom extends Pass {
 
   setSize(w, h) {
     this.lit.setSize(w, h);
-    this.hist[0].setSize(w, h);
-    this.hist[1].setSize(w, h);
+    const hw = Math.max(2, Math.floor(w * this.histScale));
+    const hh = Math.max(2, Math.floor(h * this.histScale));
+    this.hist[0].setSize(hw, hh);
+    this.hist[1].setSize(hw, hh);
     this.primed = false;
     this.bloom.setSize(w, h);
   }

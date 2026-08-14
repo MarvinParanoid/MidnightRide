@@ -59,10 +59,14 @@ export class DevHud {
 
     /* The text costs a layout, so it is rewritten a few times a second rather
        than sixty — the panel must not be the reason the frame rate drops. */
+    /* p90 as well as the average: a ragged graph is a p90 problem, and the
+       number people quote — average frames per second — hides it completely. */
     this.acc += dt;
     if (this.acc < 0.25) return;
     this.acc = 0;
-    const d = read();
+    const sorted = Array.from(this.times).filter((x) => x > 0).sort((a, b) => a - b);
+    this.worst = sorted.length ? sorted[Math.floor(sorted.length * 0.9)] : 0;
+    const d = read(this.worst);
     this.pre.textContent = Object.entries(d)
       .map(([k, v]) => `${k.padEnd(11)}${v}`)
       .join('\n');

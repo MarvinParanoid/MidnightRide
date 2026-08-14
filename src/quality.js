@@ -32,9 +32,9 @@ import { isTouchDevice } from './input.js';
    curve stops being worth it — and note the unhappy consequence: a machine the
    guard steps down gets *more* flicker, not less. */
 export const TIERS = [
-  { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 48 },
-  { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 28 },
-  { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 14 },
+  { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 32 },
+  { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 22 },
+  { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12 },
 ];
 
 /** Where to start before we know anything. Phones start low; everything else high. */

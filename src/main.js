@@ -663,11 +663,13 @@ function frame() {
 
   /* After the render, not before: renderer.info is reset at the top of the
      frame, so reading it earlier reports the previous frame as zero. */
-  dev.update(dt, () => {
+  dev.update(dt, (worst) => {
     const r = renderer.info;
     const f = assets().glowField;
     return {
-      fps: `${fps.toFixed(0)}  (${(dt * 1000).toFixed(1)} ms)`,
+      /* The worst tenth of frames, not the average: a stutter you can feel is
+         invisible in a mean. */
+      fps: `${fps.toFixed(0)}  now ${(dt * 1000).toFixed(1)} ms  worst ${(worst * 1000).toFixed(1)} ms`,
       quality: `${guard.name}  ${guard.changes} change${guard.changes === 1 ? '' : 's'}`,
       ssr: ssr.enabled
         ? `${ssr.material.uniforms.uSteps.value} steps @ ${ssr.target.width}x${ssr.target.height}`
