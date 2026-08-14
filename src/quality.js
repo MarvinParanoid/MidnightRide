@@ -14,11 +14,15 @@ import { isTouchDevice } from './input.js';
    off. It used to be zero on the low profile, which made the guard's first
    step-down look like a bug — reflections appeared for a few seconds and then
    went out. The pass runs at half resolution now, so even the low profile can
-   afford a short march and the effect thins out instead of vanishing. */
+   afford a march and the effect thins out instead of vanishing.
+   The counts are higher than they look: the march walks pixels rather than
+   metres, so a step is a step of the projected line and forty-eight of them at
+   half resolution costs about what twenty did at full. Measured: reflections
+   are continuous from 48 up, and 64 adds almost nothing. */
 export const TIERS = [
-  { name: 'high', pixelRatio: 1.75, bloomScale: 1.0, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 20 },
-  { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 14 },
-  { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 8 },
+  { name: 'high', pixelRatio: 1.75, bloomScale: 1.0, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 48 },
+  { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 28 },
+  { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 14 },
 ];
 
 /** Where to start before we know anything. Phones start low; everything else high. */

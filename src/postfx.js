@@ -95,6 +95,7 @@ const SSRShader = {
     uWet: { value: 0 },
     uSteps: { value: 20 },
     uThickness: { value: 0.55 },
+    uRes: { value: new THREE.Vector2(1, 1) },
     uDebug: { value: 0 },
   },
   vertexShader: /* glsl */ `
@@ -110,6 +111,7 @@ const SSRShader = {
     uniform mat4 uProj, uInvProj;
     uniform vec3 uUpView;
     uniform float uStrength, uWet, uSteps, uThickness, uDebug;
+    uniform vec2 uRes;
     varying vec2 vUv;
 
     vec3 viewPos(vec2 uv) {
@@ -154,48 +156,79 @@ const SSRShader = {
       float towardsEye = 1.0 - smoothstep(-0.15, 0.05, R.z);
       if (towardsEye < 0.01) { gl_FragColor = vec4(0.0); return; }
 
-      /* Start each ray a random fraction of a step along. Without it every ray
-         in a neighbourhood crosses the surface at the same step index and the
-         reflection arrives as chunky parallelograms — the march's own stride,
-         drawn on the road. Jitter turns that banding into noise, which the eye
-         reads as the texture of wet tarmac rather than as an artefact. */
+      /* March in screen space, one pixel at a time.
+         The first version stepped through view space by a distance that grew
+         geometrically — which oversamples near the camera, undersamples far
+         from it, and never covers the whole ray, so a lamp fifty metres off
+         could not be found at all. Walking the projected line instead means
+         every step lands on a new pixel and the stride is chosen so the ray's
+         whole screen-space length fits in the budget. This is the DDA setup
+         from kode80's write-up, with the perspective-correct 1/w carried along
+         so the depth at each pixel is exact rather than interpolated linearly. */
+      vec3 startV = P + n * 0.05;
+      vec3 endV = startV + R * 140.0;
+      if (endV.z > -0.1) endV = startV + R * ((-0.1 - startV.z) / R.z);   // clip to the near plane
+
+      vec4 h0 = uProj * vec4(startV, 1.0);
+      vec4 h1 = uProj * vec4(endV, 1.0);
+      float k0 = 1.0 / h0.w, k1 = 1.0 / h1.w;
+      vec3 q0 = startV * k0, q1 = endV * k1;
+      vec2 p0 = (h0.xy * k0 * 0.5 + 0.5) * uRes;
+      vec2 p1 = (h1.xy * k1 * 0.5 + 0.5) * uRes;
+      if (distance(p0, p1) < 1.0) p1 += vec2(1.0);
+
+      vec2 dxy = p1 - p0;
+      bool permute = abs(dxy.x) < abs(dxy.y);      // step along the longer axis
+      if (permute) { p0 = p0.yx; p1 = p1.yx; dxy = dxy.yx; }
+      float sx = sign(dxy.x);
+      float invdx = sx / dxy.x;
+      vec2 dp = vec2(sx, dxy.y * invdx);
+      vec3 dq = (q1 - q0) * invdx;
+      float dk = (k1 - k0) * invdx;
+
+      // one step per pixel where the budget allows it, longer when it does not
+      float stride = max(1.0, abs(dxy.x) / uSteps);
+      dp *= stride; dq *= stride; dk *= stride;
+
       float dither = fract(sin(dot(vUv, vec2(12.9898, 78.233))) * 43758.5453);
-      float stepLen = 0.35 + (-P.z) * 0.02;
-      vec3 pos = P + n * 0.06 + R * stepLen * dither;
+      vec2 pp = p0 + dp * dither;
+      vec3 qq = q0 + dq * dither;
+      float kk = k0 + dk * dither;
+
+      float prevZ = startV.z;
       float found = 0.0;
       float travelled = 0.0;
       vec2 hitUv = vec2(0.0);
-      vec3 prev = pos;
+      vec2 prevP = pp;
+      float prevQz = qq.z, prevK = kk;
 
-      for (int i = 0; i < 40; i++) {
+      for (int i = 0; i < 64; i++) {
         if (float(i) >= uSteps) break;
-        prev = pos;
-        pos += R * stepLen;
-        travelled += stepLen;
-        stepLen *= 1.16;
-        vec4 clip = uProj * vec4(pos, 1.0);
-        vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+        prevP = pp; prevQz = qq.z; prevK = kk;
+        pp += dp; qq += dq; kk += dk;
+        vec2 uv = (permute ? pp.yx : pp) / uRes;
         if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
+
+        float rayZ = qq.z / kk;
         float sceneZ = viewPos(uv).z;
-        float behind = sceneZ - pos.z;           // >0 when the ray is behind the surface
-        /* A fixed thickness, not one that grows with the stride. Tying it to
-           the step made distant hits accept anything within metres of the
-           surface, which is what stretches a reflection into a smear. */
-        if (behind > 0.0 && behind < uThickness + travelled * 0.03) {
-          /* Halve back and forth a few times: the coarse step says which stride
-             the crossing is in, this says where in it. */
-          vec3 lo = prev, hi = pos;
-          for (int k = 0; k < 4; k++) {
-            vec3 mid = (lo + hi) * 0.5;
-            vec4 c2 = uProj * vec4(mid, 1.0);
-            vec2 u2 = c2.xy / c2.w * 0.5 + 0.5;
-            if (viewPos(u2).z - mid.z > 0.0) hi = mid; else lo = mid;
+        travelled = abs(rayZ - startV.z);
+        /* A crossing: the ray was in front of the surface and is now behind it,
+           and not so far behind that it has passed through something thin. */
+        if (prevZ >= sceneZ && rayZ < sceneZ && sceneZ - rayZ < uThickness + travelled * 0.04) {
+          vec2 lo = prevP, hi = pp;
+          float lq = prevQz, hq = qq.z, lk = prevK, hk = kk;
+          for (int b = 0; b < 4; b++) {
+            vec2 mp = (lo + hi) * 0.5;
+            float mq = (lq + hq) * 0.5, mk = (lk + hk) * 0.5;
+            vec2 muv = (permute ? mp.yx : mp) / uRes;
+            if (mq / mk < viewPos(muv).z) { hi = mp; hq = mq; hk = mk; }
+            else { lo = mp; lq = mq; lk = mk; }
           }
-          vec4 c3 = uProj * vec4(hi, 1.0);
-          hitUv = c3.xy / c3.w * 0.5 + 0.5;
+          hitUv = (permute ? hi.yx : hi) / uRes;
           found = 1.0;
           break;
         }
+        prevZ = rayZ;
       }
 
       if (found < 0.5) { gl_FragColor = vec4(0.0); return; }
@@ -267,7 +300,11 @@ class SSRPass extends Pass {
   }
 
   setSize(w, h) {
-    this.target.setSize(Math.max(2, Math.floor(w * this.scale)), Math.max(2, Math.floor(h * this.scale)));
+    const sw = Math.max(2, Math.floor(w * this.scale));
+    const sh = Math.max(2, Math.floor(h * this.scale));
+    this.target.setSize(sw, sh);
+    // the march walks pixels, so it has to know how many there are
+    this.material.uniforms.uRes.value.set(sw, sh);
   }
 
   render(renderer, writeBuffer, readBuffer) {
