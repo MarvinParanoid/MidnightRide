@@ -254,3 +254,24 @@ body.nohints .auto { display: none; }   /* a recording shouldn't advertise the a
   margin-top: 8px; font-size: 11px; letter-spacing: 0.24em;
   color: rgba(150, 168, 200, 0.42);
 }
+
+/* The developer panel. Deliberately unlike the game's own interface: this is
+   instrumentation, and it should never be mistaken for part of the picture. */
+.devhud {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 50;
+  background: rgba(6, 8, 14, 0.82);
+  border: 1px solid rgba(120, 160, 220, 0.18);
+  border-radius: 4px;
+  padding: 8px 10px;
+  pointer-events: none;
+}
+.devhud canvas { display: block; background: rgba(0, 0, 0, 0.35); border-radius: 2px; }
+.devhud pre {
+  margin: 8px 0 0;
+  font: 11px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: rgba(190, 214, 246, 0.9);
+  white-space: pre;
+}

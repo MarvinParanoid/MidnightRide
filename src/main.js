@@ -22,6 +22,7 @@ import { Music } from './audio/music.js';
 import { clamp, damp, smoothstep } from './geo.js';
 import { assets } from './assets.js';
 import { telemetry } from './telemetry.js';
+import { DevHud } from './devhud.js';
 
 /* ── renderer ──────────────────────────────────────────────── */
 const canvas = document.getElementById('scene');
@@ -40,6 +41,10 @@ const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.4, 52
 camera.position.set(0, 3, 8);
 
 const { composer, bloom, grade, ssr } = createComposer(renderer, scene, camera, quality);
+/* The guard only calls applyTier when it changes something, so the starting
+   profile has to be handed over once by hand. */
+ssr.material.uniforms.uSteps.value = quality.ssrSteps;
+ssr.enabled = quality.ssrSteps > 0;
 
 /* ── world ─────────────────────────────────────────────────── */
 scene.add(assets().glowField.mesh);     // every glow in the game, one draw call
@@ -94,6 +99,9 @@ const photo = new PhotoMode({ camera, renderer, scene, composer, canvas });
 /* ?stream=1 turns the game into a channel: autopilot only, gentler pace,
    the interface replaced by a station ident. */
 const stream = new StreamMode();
+/* Instrumentation, never on a broadcast: ?dev=1 or F3. */
+const dev = new DevHud();
+if (stream.active) dev.on = false;
 const pacer = new StreamPacer();
 if (stream.active) {
   hud.root.classList.add('off');
@@ -289,6 +297,14 @@ async function begin() {
 }
 document.addEventListener('pointerdown', begin, { once: true });
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'F3' && !stream.active) { dev.toggle(); return; }
+  /* An A/B you can do with your eyes: the reflection pass on and off, in place,
+     without reloading or editing anything. */
+  if (e.code === 'F4' && !stream.active) {
+    ssr.enabled = !ssr.enabled;
+    hud.toast(ssr.enabled ? 'REFLECTIONS ON' : 'REFLECTIONS OFF');
+    return;
+  }
   if (!running && (e.code === 'Space' || e.code === 'Enter' || e.code === 'KeyW')) begin();
 });
 
@@ -637,6 +653,36 @@ function frame() {
 
   assets().glowField.update(scene);
   composer.render();
+
+  /* After the render, not before: renderer.info is reset at the top of the
+     frame, so reading it earlier reports the previous frame as zero. */
+  dev.update(dt, () => {
+    const r = renderer.info;
+    const f = assets().glowField;
+    return {
+      fps: `${fps.toFixed(0)}  (${(dt * 1000).toFixed(1)} ms)`,
+      quality: `${guard.name}  ${guard.changes} change${guard.changes === 1 ? '' : 's'}`,
+      ssr: ssr.enabled
+        ? `${ssr.material.uniforms.uSteps.value} steps @ ${ssr.target.width}x${ssr.target.height}`
+        : 'off  (F4)',
+      /* Configured is not the same as working. This is the fraction of the road
+         that actually found something to reflect: zero means the pass is doing
+         nothing, whatever the line above says. */
+      reflected: !ssr.enabled ? '—'
+        : ssr.material.uniforms.uWet.value < 0.01 ? 'dry road, nothing to mirror'
+          : `${(ssr.coverage(renderer) * 100).toFixed(0)}% of the road`,
+      draws: `${r.render.calls}  ${(r.render.triangles / 1000).toFixed(1)}k tris`,
+      memory: `${r.memory.textures} tex  ${r.memory.geometries} geo  ${r.programs.length} prog`,
+      glows: `${f.mesh.count} of ${f.max}`,
+      where: `${biome}  ${(state.s / 1000).toFixed(2)} km  lat ${state.lat.toFixed(2)}`,
+      speed: `${(state.v * 3.6).toFixed(0)} km/h`,
+      rain: `${rainAmount.toFixed(2)}  enclosure ${state.enclosure.toFixed(2)}`,
+      radio: music ? `${music.stationName}  ${Math.round(music.bpm)} bpm` : 'off',
+      energy: music ? music.energy.toFixed(2) : '—',
+    };
+  });
+
+
 
   /* the drawing buffer is only intact for the rest of this task */
   if (photo.wantShot && photo.maybeCapture(place)) { hud.flashShot(); telemetry.data.shots++; }

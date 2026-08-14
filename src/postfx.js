@@ -320,6 +320,36 @@ class SSRPass extends Pass {
     this.quadB.render(renderer);
   }
 
+  /**
+   * What fraction of the road actually found a reflection, 0..1.
+   *
+   * The pass has been silently doing nothing twice: once with an empty depth
+   * buffer, once marching twenty steps when the profile asked for forty-eight.
+   * Both times it was configured correctly and produced not one pixel. Reading
+   * the alpha it wrote is the only statement that means anything.
+   *
+   * This stalls the pipeline, so it is for the developer panel and nothing else.
+   */
+  coverage(renderer) {
+    const w = Math.min(128, this.target.width);
+    const h = Math.min(64, Math.floor(this.target.height * 0.4));
+    const x = Math.floor((this.target.width - w) / 2);
+    if (!this._read || this._read.length !== w * h * 4) this._read = new Uint16Array(w * h * 4);
+    try {
+      renderer.readRenderTargetPixels(this.target, x, 0, w, h, this._read);
+    } catch { return -1; }
+    /* Half floats, because the target is HDR — neon reflects brighter than 1. */
+    const half = (u) => {
+      const e = (u & 0x7c00) >> 10, f = u & 0x03ff;
+      if (e === 0) return (f / 1024) * 6.103515625e-5;
+      if (e === 0x1f) return 1;
+      return Math.pow(2, e - 15) * (1 + f / 1024);
+    };
+    let hit = 0;
+    for (let i = 3; i < this._read.length; i += 4) if (half(this._read[i]) > 0.02) hit++;
+    return hit / (w * h);
+  }
+
   dispose() {
     this.target.dispose();
     this.quadA.dispose();
