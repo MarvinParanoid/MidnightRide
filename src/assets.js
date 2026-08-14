@@ -246,7 +246,55 @@ export function assets() {
       toneMapped: false,
     });
 
+  /* A cone of lit air under a lamp. It only exists when there is something in
+     the air to scatter off — dry night, no shaft — so its strength is driven
+     from the weather each frame rather than baked into the chunk. */
+  const shaft = new THREE.ShaderMaterial({
+    uniforms: {
+      color: { value: new THREE.Color(0xffc074) },
+      opacity: { value: 0 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        vUv = uv;
+        vNormal = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vView = -mv.xyz;
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 color;
+      uniform float opacity;
+      varying vec2 vUv;
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        /* Bright at the lamp, gone before the road — a shaft that reaches the
+           tarmac at full strength reads as a solid cone of plastic. */
+        float down = pow(1.0 - vUv.y, 1.7);
+        /* And fade where the shell turns edge-on to you. The first version
+           faded across the unwrapped circumference instead, which put a dark
+           seam down one side of the cone and left the opposite side at full
+           strength — the straight hard edge that gave the whole thing away as
+           a piece of geometry rather than lit air. */
+        float face = pow(abs(dot(normalize(vNormal), normalize(vView))), 0.55);
+        gl_FragColor = vec4(color, down * face * opacity);
+      }
+    `,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+    toneMapped: false,
+  });
+
   cache = {
+    shaft,
     tex: { glow, dot, streak, band, wetness, windows, glyphs },
 
     /* surfaces */

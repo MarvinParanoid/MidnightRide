@@ -166,6 +166,11 @@ export class ChunkCtx {
       emissiveMat(hex, intensity, this.a.tex.glyphs, 'glyphs'));
   }
 
+  /** The cone of lit air under a lamp, visible only in weather. */
+  shaftBuilder() {
+    return this.get('shaft', this.a.shaft);
+  }
+
   /** A soft pool of reflected light — fades in every direction. */
   pool(hex, intensity = 1) {
     return this.get(`p${hex}_${intensity}`, decalCached(hex, intensity, 1, 'glow'));
@@ -253,9 +258,35 @@ function streetLamp(ctx, s, side) {
 
   ctx.halo(new THREE.Vector3(headP.x, armY - 0.2, headP.z), LAMP_WARM, 7.5, 0.42);
 
-  // pool of light on the wet tarmac, stretched down the road
-  const p = ctx.at(s, lat - side * 3.0, 0.02);
-  ctx.pool(LAMP_WARM, 0.62).decal(p, ctx.right(s), ctx.forward(s), 14, 24, 0.02);
+  /* Pool of light on the wet tarmac, stretched down the road.
+     It has to stay on the tarmac. Fourteen metres wide, centred 5.7 m out, it
+     reached 12.7 m from the centreline — four and a half metres past the edge
+     of the shoulder and over the verge, which is a separate mesh sitting a
+     little higher. The decal went under it and the depth test cut the light
+     off along a dead straight line running down the road: the hard edge under
+     every lamp. The carriageway plus its shoulder is 8.2 m, so the pool ends
+     there too. */
+  const p = ctx.at(s, lat - side * 2.2, 0.03);
+  ctx.pool(LAMP_WARM, 0.62).decal(p, ctx.right(s), ctx.forward(s), 10, 24, 0.03);
+
+  /* The shaft of air the lamp lights up. Built into the chunk like everything
+     else, so it costs one draw call for every lamp in view rather than one
+     each; whether it can be seen at all is decided per frame by the weather. */
+  const shaft = ctx.shaftBuilder();
+  const top = new THREE.Vector3(headP.x, armY - 0.3, headP.z);
+  const SEG = 10;
+  const rTop = 0.55, rBot = 3.4, drop = armY - 0.5;
+  for (let i = 0; i < SEG; i++) {
+    const a0 = (i / SEG) * Math.PI * 2;
+    const a1 = ((i + 1) / SEG) * Math.PI * 2;
+    const P = (ang, r, y) => new THREE.Vector3(
+      top.x + Math.cos(ang) * r, top.y - y, top.z + Math.sin(ang) * r
+    );
+    shaft.quad(
+      P(a0, rTop, 0), P(a1, rTop, 0), P(a1, rBot, drop), P(a0, rBot, drop),
+      i / SEG, 0, (i + 1) / SEG, 1
+    );
+  }
 }
 
 function guardrail(ctx, side) {

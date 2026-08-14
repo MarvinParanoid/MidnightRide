@@ -650,6 +650,9 @@ function frame() {
   grade.uniforms.uTime.value = now;
   grade.uniforms.uSpeed.value = Math.pow(speed01, 1.6);
   grade.uniforms.uWet.value = rainAmount * clamp(state.v / 40, 0, 1) * 0.55;
+  /* Light shafts need something in the air. Rain gives it; a clear night does
+     not, and a shaft hanging under a lamp on a dry road is a cone of plastic. */
+  a.shaft.uniforms.opacity.value = Math.pow(rainAmount, 0.8) * 0.1 * (1 - state.enclosure * 0.8);
 
   /* Reflections need the camera as it is this frame, and only appear on a road
      that is actually wet — a dry one is not a mirror. */
