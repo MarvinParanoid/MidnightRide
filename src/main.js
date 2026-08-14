@@ -672,6 +672,9 @@ function frame() {
         : ssr.material.uniforms.uWet.value < 0.01 ? 'dry road, nothing to mirror'
           : `${(ssr.coverage(renderer) * 100).toFixed(0)}% of the road`,
       draws: `${r.render.calls}  ${(r.render.triangles / 1000).toFixed(1)}k tris`,
+      /* Flicker scales with this: halve it and the lamps pulse half again as
+         much. Shown because it is the one knob that trades frames for calm. */
+      bloom: `${TIERS[guard.index].bloomScale}x buffer  strength ${bloom.strength.toFixed(2)}`,
       memory: `${r.memory.textures} tex  ${r.memory.geometries} geo  ${r.programs.length} prog`,
       glows: `${f.mesh.count} of ${f.max}`,
       where: `${biome}  ${(state.s / 1000).toFixed(2)} km  lat ${state.lat.toFixed(2)}`,

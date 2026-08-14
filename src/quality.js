@@ -19,8 +19,16 @@ import { isTouchDevice } from './input.js';
    metres, so a step is a step of the projected line and forty-eight of them at
    half resolution costs about what twenty did at full. Measured: reflections
    are continuous from 48 up, and 64 adds almost nothing. */
+/* bloomScale is the resolution of the bloom's own buffer, and it turned out to
+   be what makes street lamps flicker. Measured over forty consecutive frames of
+   the same drive, the frame-to-frame jitter of the light above the horizon:
+   0.5x -> 12.5%, 1x -> 8.8%, 1.5x -> 7.5%, 2x -> 5.7%. A bright light crossing
+   the texels of a coarse mip pulses on their boundaries, and the finer the grid
+   the less it pulses. It costs the square of the number, so 1.5 is where the
+   curve stops being worth it — and note the unhappy consequence: a machine the
+   guard steps down gets *more* flicker, not less. */
 export const TIERS = [
-  { name: 'high', pixelRatio: 1.75, bloomScale: 1.0, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 48 },
+  { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 48 },
   { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 28 },
   { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 14 },
 ];
