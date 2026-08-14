@@ -19,6 +19,7 @@ import { palette, nightHourFromLocal, placeName, weatherForToday } from './timeo
 import { AudioCore } from './audio/core.js';
 import { EngineSound } from './audio/engine.js';
 import { Music } from './audio/music.js';
+import { TrafficSound } from './audio/traffic.js';
 import { clamp, damp, smoothstep } from './geo.js';
 import { assets } from './assets.js';
 import { telemetry } from './telemetry.js';
@@ -66,6 +67,7 @@ const events = new Events(scene, road);
 let audio = null;
 let engine = null;
 let music = null;
+let trafficSound = null;
 
 /* ── ride state ────────────────────────────────────────────── */
 const state = {
@@ -288,7 +290,11 @@ async function begin() {
   engine = new EngineSound(audio);
   music = new Music(audio);
   music.onBeat = () => { state.beat = 1; };
-  traffic.onPass = (i) => engine && engine.whoosh(i);
+  trafficSound = new TrafficSound(audio);
+  /* The whoosh stays: it is the slap of air at the closest point, which the
+     engine voices do not cover — but it is now the punctuation rather than the
+     whole sentence. */
+  traffic.onPass = (i) => engine && engine.whoosh(i * 0.6);
   await audio.start();
   hud.toast(`${place.toUpperCase()} · ${weather.name.toUpperCase()}`);
   state.lastInput = clock;   // the idle clock starts now
@@ -627,6 +633,7 @@ function frame() {
     });
     audio.setEnclosure(state.enclosure);
     music.setContext({ biome, remote: state.remote, rain: rainAmount });
+    trafficSound.update(dt, traffic.cars, state);
     /* Normalised against the speeds people actually ride at, not the top speed.
        Measured over a drive: p10 80 km/h, median 101, p90 133. Dividing by 230
        squeezed all of that into 0.35–0.58, where every layer gate was already
@@ -777,4 +784,5 @@ window.__mr = {
   get audio() { return audio; },
   get engine() { return engine; },
   get music() { return music; },
+  get trafficSound() { return trafficSound; },
 };
