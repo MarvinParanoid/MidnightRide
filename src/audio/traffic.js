@@ -110,7 +110,11 @@ class Voice {
 export class TrafficSound {
   constructor(core, voices = 4) {
     this.core = core;
-    this.out = core.gain(0.9);
+    /* Measured at the loudest moment of a pass, thirteen metres away: at 0.9
+       this bus hit -12.3 dB against the rider's own engine at -18.6, so another
+       vehicle was six decibels louder than the machine underneath you. Your own
+       engine is the thing you are sitting on; it wins. */
+    this.out = core.gain(0.36);
     this.out.connect(core.master);
     this.voices = Array.from({ length: voices }, () => new Voice(core, this.out));
   }

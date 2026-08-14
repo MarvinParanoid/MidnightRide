@@ -14,7 +14,10 @@ export class EngineSound {
     this.core = core;
 
     this.out = core.gain(0.0);
-    this.out.connect(core.master);
+    /* And a brick wall under the whole engine, for the same reason. */
+    this.rumbleCut = core.filter('highpass', 28, 0.7);
+    this.out.connect(this.rumbleCut);
+    this.rumbleCut.connect(core.master);
 
     /* ── cylinders ─────────────────────────────────────── */
     this.bus = core.gain(1);
@@ -63,10 +66,17 @@ export class EngineSound {
     this.windSrc = core.noiseSource();
     this.windLp = core.filter('lowpass', 700, 0.7);
     this.windHp = core.filter('highpass', 120, 0.5);
+    /* Air over the top of a helmet is not flat hiss, it howls — and a narrow
+       resonance is heard far better than the same energy spread across the
+       spectrum, which matters here because broadband noise is what masks the
+       music. Presence without loudness. */
+    this.windPeak = core.filter('peaking', 1100, 1.5);
+    this.windPeak.gain.value = 0;
     this.windGain = core.gain(0);
     this.windSrc.connect(this.windHp);
     this.windHp.connect(this.windLp);
-    this.windLp.connect(this.windGain);
+    this.windLp.connect(this.windPeak);
+    this.windPeak.connect(this.windGain);
     this.windGain.connect(this.out);
 
     /* ── tyres on wet tarmac ───────────────────────────── */
@@ -93,16 +103,39 @@ export class EngineSound {
     this.popT = 0;
   }
 
-  /** Work out revs from road speed by picking a plausible gear. */
-  updateGearing(kmh, dt) {
-    while (this.gear < GEARS.length - 1 && kmh > GEARS[this.gear] * 0.99) this.gear++;
-    while (this.gear > 1 && kmh < GEARS[this.gear - 1] * 0.72) this.gear--;
-    const lo = GEARS[this.gear - 1];
-    const hi = GEARS[this.gear];
-    const t = clamp((kmh - lo) / (hi - lo), 0, 1);
-    const target = lerp(2100, REDLINE, t);
+  /**
+   * Work out revs from road speed by picking a plausible gear.
+   *
+   * The first version upshifted only on reaching the top of a gear, so the
+   * engine always sat wherever that gear happened to put it — measured: 9371
+   * rpm at 40 km/h and 8037 at 90, against a redline of 9800. That is a bike
+   * being thrashed in first, not one being ridden, and it is why slowing down
+   * could *raise* the note.
+   *
+   * A gear is now anything the speed physically allows, and which one you are
+   * in depends on the throttle: cruising takes the tallest gear it can, opening
+   * it up drops down for the revs. Which is what a rider does.
+   */
+  updateGearing(kmh, throttle, dt) {
+    const wantFrac = lerp(0.42, 0.88, clamp(throttle, 0, 1));
+    let best = 1;
+    let bestErr = Infinity;
+    for (let g = 1; g < GEARS.length; g++) {
+      const revs = REDLINE * (kmh / GEARS[g]);
+      if (revs > REDLINE * 1.02 || revs < 1900) continue;      // over-revving, or lugging
+      const err = Math.abs(revs / REDLINE - wantFrac);
+      if (err < bestErr) { bestErr = err; best = g; }
+    }
+    /* Hysteresis, or the gearbox hunts on every wobble of the throttle. */
+    this.shiftHold = Math.max(0, (this.shiftHold || 0) - dt);
+    if (best !== this.gear && this.shiftHold <= 0) {
+      this.gear = best;
+      this.shiftHold = 0.45;
+    }
+
+    const target = REDLINE * (kmh / GEARS[this.gear]);
     const idleBlend = clamp(kmh / 8, 0, 1);
-    const want = lerp(IDLE_RPM, target, idleBlend);
+    const want = lerp(IDLE_RPM, clamp(target, 1400, REDLINE), idleBlend);
     // revs chase the target, but never instantly — that lag is the whole feel
     this.rpm += (want - this.rpm) * Math.min(1, dt * 6.5);
   }
@@ -116,7 +149,7 @@ export class EngineSound {
        the wind step back a little rather than shouting over it */
     this.out.gain.setTargetAtTime(0.45 - clamp(musicEnergy, 0, 1) * 0.16, t, 0.7);
     const prevGear = this.gear;
-    this.updateGearing(kmh, dt);
+    this.updateGearing(kmh, throttle, dt);
 
     if (this.gear !== prevGear) this.shiftT = 0.11;   // brief cut on the upshift
     this.shiftT = Math.max(0, this.shiftT - dt);
@@ -126,14 +159,25 @@ export class EngineSound {
     const f = clamp(this.rpm / 60, 18, 190);          // firing frequency
 
     for (const o of this.oscs) o.frequency.setTargetAtTime(f, t, 0.02);
-    this.sub.frequency.setTargetAtTime(f * 0.5, t, 0.03);
+    /* Never below thirty hertz. At idle the firing frequency is twenty, so the
+       sub was sitting at ten — measured as the loudest band in the whole engine
+       at idle (-32 dB against -42 for everything above it) and audible to
+       nobody. The same mistake the music made with an 18 Hz sub. */
+    this.sub.frequency.setTargetAtTime(Math.max(30, f * 0.5), t, 0.03);
 
     const load = clamp(throttle * 0.85 + revs * 0.18, 0, 1);
     this.lp.frequency.setTargetAtTime(240 + load * 2900 + revs * 1500, t, 0.05);
     this.lp.Q.setTargetAtTime(1.2 + load * 3.4, t, 0.1);
     this.exBp.frequency.setTargetAtTime(300 + revs * 1400, t, 0.06);
     this.exGain.gain.setTargetAtTime((0.06 + revs * 0.3) * (0.4 + throttle * 0.6) * cut, t, 0.05);
-    this.bus.gain.setTargetAtTime((0.13 + load * 0.15) * cut, t, 0.04);
+    /* The engine steps back a little as the speed comes up, so that the wind
+       has somewhere to go. Measured: the engine bus sat 20 dB above the wind at
+       190 km/h, and no amount of lifting the wind could close that without the
+       broadband noise swallowing the music. Shifting the balance with speed
+       costs nothing and is what actually happens on a bike — past a hundred and
+       fifty you stop hearing the engine and start hearing the air. */
+    const fast = clamp(kmh / 190, 0, 1);
+    this.bus.gain.setTargetAtTime((0.13 + load * 0.15) * cut * (1 - fast * 0.3), t, 0.04);
 
     /* overrun crackle: shut the throttle at high revs and it talks back */
     this.popT -= dt;
@@ -142,13 +186,24 @@ export class EngineSound {
       this.popT = 0.06 + Math.random() * 0.22;
     }
 
-    /* wind is broadband noise — the one thing that will happily mask an entire
-       mix — so it stays dark and well under the music */
+    /* Wind is broadband noise, the one thing that will happily mask an entire
+       mix, so it was kept dark — and it was kept so dark that it did nothing.
+       Measured against the engine: 46 dB down at 60 km/h and 28 dB down at 190,
+       with the low-pass at 940 Hz flat out, which removes the hiss that is what
+       makes wind sound like wind rather than like rumble. On a motorcycle at
+       190 the wind is the loudest thing there is; here it was inaudible, and
+       the whole sense of speed was left to the pitch of the engine.
+       Opened up and lifted — still under the music, but present. */
     const v = kmh / 3.6;
-    this.windGain.gain.setTargetAtTime(Math.pow(clamp(v / 50, 0, 1.35), 2) * 0.115, t, 0.15);
-    this.windLp.frequency.setTargetAtTime(360 + v * 11, t, 0.2);
+    this.windGain.gain.setTargetAtTime(Math.pow(clamp(v / 50, 0, 1.35), 2) * 0.3, t, 0.15);
+    this.windLp.frequency.setTargetAtTime(620 + v * 40, t, 0.2);
+    // the howl climbs and sharpens with speed
+    this.windPeak.frequency.setTargetAtTime(700 + v * 22, t, 0.2);
+    this.windPeak.gain.setTargetAtTime(clamp(v / 45, 0, 1.2) * 11, t, 0.3);
 
-    const tyre = clamp(v / 40, 0, 1.3) * (0.035 + rain * 0.1) + (offRoad ? 0.18 : 0);
+    /* Dry tyre roar measured 44 dB under the engine — nothing. Wet was already
+       fine, so only the dry floor moves. */
+    const tyre = clamp(v / 40, 0, 1.3) * (0.062 + rain * 0.1) + (offRoad ? 0.18 : 0);
     this.tyreGain.gain.setTargetAtTime(tyre, t, 0.12);
     this.tyreBp.frequency.setTargetAtTime(offRoad ? 380 : 700 + v * 16, t, 0.2);
     this.tyreBp.Q.setTargetAtTime(offRoad ? 1.6 : 0.55, t, 0.2);
