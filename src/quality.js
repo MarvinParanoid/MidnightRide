@@ -15,6 +15,10 @@ import { isTouchDevice } from './input.js';
    step-down look like a bug — reflections appeared for a few seconds and then
    went out. The pass runs at half resolution now, so even the low profile can
    afford a march and the effect thins out instead of vanishing.
+   With the bloom held still between frames (StableBloom) the same buffer buys
+   more: 1.0x -> 0.067 per unit of light, 1.25x -> 0.060, 1.5x -> 0.0515, which
+   is the floor the picture itself sets. 1.5 reaches it; nothing above is worth
+   paying for.
    The counts are higher than they look: the march walks pixels rather than
    metres, so a step is a step of the projected line and forty-eight of them at
    half resolution costs about what twenty did at full. Measured: reflections

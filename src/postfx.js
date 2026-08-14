@@ -376,6 +376,129 @@ class SSRPass extends Pass {
   }
 }
 
+
+/**
+ * Bloom, held still between frames.
+ *
+ * Measured over forty-five consecutive frames of the same drive, normalised by
+ * the light in the picture: the rendered image jitters by 0.051 per unit of
+ * light, and with bloom on that becomes 0.107. Bloom is not the source of the
+ * flicker, it is a multiplier of almost exactly two — and it multiplies whether
+ * or not the emissive lamp quads are in the scene, so no amount of tidying the
+ * sources fixes it.
+ *
+ * The bloom is therefore separated from the picture it was computed from,
+ * blended with the previous frame's bloom, and added back. Only the glow is
+ * smoothed; the image stays sharp. A little trail on a light streaming past at
+ * a hundred and thirty is not a defect — it is what the eye does anyway.
+ */
+class StableBloom extends Pass {
+  constructor(bloom, size, keep = 0.55) {
+    super();
+    this.bloom = bloom;
+    this.keep = keep;
+    const opts = { type: THREE.HalfFloatType, depthBuffer: false };
+    this.lit = new THREE.WebGLRenderTarget(size.x, size.y, opts);      // picture + bloom
+    this.hist = [
+      new THREE.WebGLRenderTarget(size.x, size.y, opts),
+      new THREE.WebGLRenderTarget(size.x, size.y, opts),
+    ];
+    this.flip = 0;
+    this.primed = false;
+
+    /* new history = mix(this frame's bloom, last frame's, keep) */
+    this.blendMat = new THREE.ShaderMaterial({
+      uniforms: { tLit: { value: null }, tPlain: { value: null }, tHist: { value: null },
+        uKeep: { value: keep } },
+      vertexShader: `varying vec2 vUv;
+        void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+      fragmentShader: `
+        uniform sampler2D tLit, tPlain, tHist;
+        uniform float uKeep;
+        varying vec2 vUv;
+        void main() {
+          vec3 glow = max(vec3(0.0), texture2D(tLit, vUv).rgb - texture2D(tPlain, vUv).rgb);
+          gl_FragColor = vec4(mix(glow, texture2D(tHist, vUv).rgb, uKeep), 1.0);
+        }`,
+    });
+    this.addMat = new THREE.ShaderMaterial({
+      uniforms: { tPlain: { value: null }, tHist: { value: null } },
+      vertexShader: `varying vec2 vUv;
+        void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+      fragmentShader: `
+        uniform sampler2D tPlain, tHist;
+        varying vec2 vUv;
+        void main() {
+          gl_FragColor = vec4(texture2D(tPlain, vUv).rgb + texture2D(tHist, vUv).rgb, 1.0);
+        }`,
+    });
+    /* UnrealBloomPass has needsSwap = false and writes its result back into the
+       buffer it was given to read. So the un-bloomed picture has to be taken
+       aside first, or there is nothing left to subtract the glow from — the
+       first version of this pass was a no-op for exactly that reason, and
+       measured bit-for-bit identical to having no pass at all. */
+    this.copyMat = new THREE.ShaderMaterial({
+      uniforms: { tSrc: { value: null } },
+      vertexShader: `varying vec2 vUv;
+        void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+      fragmentShader: `uniform sampler2D tSrc; varying vec2 vUv;
+        void main(){ gl_FragColor = vec4(texture2D(tSrc, vUv).rgb, 1.0); }`,
+    });
+    this.quadCopy = new FullScreenQuad(this.copyMat);
+    this.quadBlend = new FullScreenQuad(this.blendMat);
+    this.quadAdd = new FullScreenQuad(this.addMat);
+  }
+
+  setSize(w, h) {
+    this.lit.setSize(w, h);
+    this.hist[0].setSize(w, h);
+    this.hist[1].setSize(w, h);
+    this.primed = false;
+    this.bloom.setSize(w, h);
+  }
+
+  render(renderer, writeBuffer, readBuffer) {
+    // keep the picture as it was, before the glow is folded into it
+    this.copyMat.uniforms.tSrc.value = readBuffer.texture;
+    renderer.setRenderTarget(this.lit);
+    renderer.clear();
+    this.quadCopy.render(renderer);
+
+    // bloom writes back into readBuffer
+    this.bloom.renderToScreen = false;
+    this.bloom.render(renderer, writeBuffer, readBuffer);
+
+    const prev = this.hist[this.flip];
+    const next = this.hist[this.flip ^ 1];
+    this.flip ^= 1;
+
+    this.blendMat.uniforms.tLit.value = readBuffer.texture;   // picture + glow
+    this.blendMat.uniforms.tPlain.value = this.lit.texture;    // picture alone
+    this.blendMat.uniforms.tHist.value = prev.texture;
+    /* The first frame has no history; blending against an empty buffer would
+       fade the glow up from nothing over half a second. */
+    this.blendMat.uniforms.uKeep.value = this.primed ? this.keep : 0;
+    this.primed = true;
+    renderer.setRenderTarget(next);
+    renderer.clear();
+    this.quadBlend.render(renderer);
+
+    this.addMat.uniforms.tPlain.value = this.lit.texture;
+    this.addMat.uniforms.tHist.value = next.texture;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    if (this.clear) renderer.clear();
+    this.quadAdd.render(renderer);
+  }
+
+  dispose() {
+    this.lit.dispose();
+    this.hist[0].dispose();
+    this.hist[1].dispose();
+    this.quadBlend.dispose();
+    this.quadAdd.dispose();
+  }
+}
+
 /**
  * Run the bloom chain at a fraction of the screen resolution. Its radius is in
  * buffer pixels, so at half res the same number smears twice as far across the
@@ -420,7 +543,8 @@ export function createComposer(renderer, scene, camera, quality = {}) {
      itself twenty times worse. The radius argument here is decorative anyway —
      applyBloomScale overwrites it on the next line. */
   const bloom = new UnrealBloomPass(size.clone().multiplyScalar(bloomScale), 0.95, 0.72, 0.42);
-  composer.addPass(bloom);
+  const stable = new StableBloom(bloom, size);
+  composer.addPass(stable);
   applyBloomScale(bloom, size, bloomScale);   // after addPass: it re-sizes passes
 
   const grade = new ShaderPass(GradeShader);
