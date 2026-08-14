@@ -31,10 +31,24 @@ import { isTouchDevice } from './input.js';
    the less it pulses. It costs the square of the number, so 1.5 is where the
    curve stops being worth it — and note the unhappy consequence: a machine the
    guard steps down gets *more* flicker, not less. */
+/* maxPixels is an absolute ceiling on the drawing buffer, and it is the knob
+   that was missing. pixelRatio only limits the density multiplier, so on a wide
+   window the low profile still rendered 2226x1122 — two and a half million
+   pixels, walked over by about a dozen full-screen passes. A profile meant for
+   a machine that cannot keep up has to be allowed to draw fewer pixels, not
+   merely fewer per CSS pixel.
+   gradeTaps is how many samples the radial blur takes, and the grade pass is
+   the most expensive one in the chain: each tap costs three texture reads,
+   because the chromatic split needs the channels separately. Five taps is
+   fifteen reads per pixel of the screen. */
+/* smaa is three extra full-screen passes. The low profile is the one profile
+   that has no multisampling at all, so it is the one that would gain most from
+   it and the one least able to pay — and it is reached by stepping down from a
+   frame rate that was already poor. Edges lose. */
 export const TIERS = [
-  { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 32 },
-  { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 22 },
-  { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12 },
+  { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 32, smaa: true, maxPixels: 3.3e6, gradeTaps: 5 },
+  { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 22, smaa: true, maxPixels: 2.2e6, gradeTaps: 4 },
+  { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12, smaa: false, maxPixels: 1.4e6, gradeTaps: 3 },
 ];
 
 /** Where to start before we know anything. Phones start low; everything else high. */

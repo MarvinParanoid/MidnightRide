@@ -4,6 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 /** Vignette + grain + chromatic fringe + radial speed blur, in one pass. */
@@ -16,6 +17,7 @@ const GradeShader = {
     uGrain: { value: 0.055 },
     uVignette: { value: 1.0 },
     uWet: { value: 0 },       // droplet wobble on the "lens"
+    uTaps: { value: 5 },      // samples in the radial blur; three reads each
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -26,7 +28,7 @@ const GradeShader = {
   `,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uTime, uSpeed, uAberration, uGrain, uVignette, uWet;
+    uniform float uTime, uSpeed, uAberration, uGrain, uVignette, uWet, uTaps;
     varying vec2 vUv;
 
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -39,8 +41,13 @@ const GradeShader = {
       vec2 dir = c * (0.006 + uSpeed * 0.055) * smoothstep(0.05, 0.75, r);
       vec3 col = vec3(0.0);
       float wsum = 0.0;
+      /* The taps span the same smear either way — fewer of them are spaced
+         further apart rather than covering less of it, so a cheaper profile
+         gets a coarser blur and not a shorter one. */
+      float last = max(1.0, uTaps - 1.0);
       for (int i = 0; i < 5; i++) {
-        float t = float(i) / 4.0;
+        if (float(i) >= uTaps) break;
+        float t = float(i) / last;
         float w = 1.0 - t * 0.72;
         vec2 uv = vUv - dir * t;
         // chromatic split grows with the blur
@@ -253,6 +260,77 @@ const SSRShader = {
 };
 
 
+/**
+ * The reflection, carried over from the frame before.
+ *
+ * One ray per pixel is a coin toss: the same patch of tarmac finds a lamp this
+ * frame and misses it the next, and the road crawls with noise that no amount
+ * of blurring within a single frame can remove — the information is not in that
+ * frame. It is in the previous one, on a different pixel, because the camera
+ * has moved. So find that pixel: unproject this one to a world point, project
+ * it through the previous frame's view, and read the reflection there.
+ *
+ * What makes this safe is the clamp. Straight accumulation smears — a reflected
+ * tail light drags a comet's tail down the road behind the car. Bounding the
+ * history to the range of colours actually present around this pixel now means
+ * history can only ever refine what this frame already believes, never invent
+ * something that has gone. That is the standard trick from temporal
+ * antialiasing and it is what separates a steady reflection from a smeared one.
+ */
+const SSRResolveShader = {
+  uniforms: {
+    tCur: { value: null },
+    tHist: { value: null },
+    tDepth: { value: null },
+    uInvProj: { value: new THREE.Matrix4() },
+    uInvView: { value: new THREE.Matrix4() },
+    uPrevViewProj: { value: new THREE.Matrix4() },
+    uKeep: { value: 0.0 },
+    uTexel: { value: new THREE.Vector2() },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tCur, tHist, tDepth;
+    uniform mat4 uInvProj, uInvView, uPrevViewProj;
+    uniform float uKeep;
+    uniform vec2 uTexel;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 cur = texture2D(tCur, vUv);
+      if (uKeep < 0.001) { gl_FragColor = cur; return; }
+
+      /* Where this pixel was a frame ago. The depth buffer is the current
+         frame's, so the world point is exact; only the camera has moved. */
+      float d = texture2D(tDepth, vUv).x;
+      vec4 clip = vec4(vUv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+      vec4 view = uInvProj * clip;
+      vec4 world = uInvView * vec4(view.xyz / view.w, 1.0);
+      vec4 prev = uPrevViewProj * world;
+      vec2 pUv = prev.xy / prev.w * 0.5 + 0.5;
+      /* Off the edge of the previous frame there is no history — that is the
+         band along the bottom of the screen the road is arriving through, and
+         it has to resolve from this frame alone. */
+      if (prev.w <= 0.0 || pUv.x < 0.0 || pUv.x > 1.0 || pUv.y < 0.0 || pUv.y > 1.0) {
+        gl_FragColor = cur; return;
+      }
+
+      vec4 lo = cur, hi = cur;
+      for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+          vec4 t = texture2D(tCur, vUv + vec2(float(x), float(y)) * uTexel);
+          lo = min(lo, t); hi = max(hi, t);
+        }
+      }
+      vec4 hist = clamp(texture2D(tHist, pUv), lo, hi);
+      gl_FragColor = mix(cur, hist, uKeep);
+    }
+  `,
+};
+
 /** Lay the half-resolution reflection over the frame it was computed from. */
 const SSRCompositeShader = {
   uniforms: { tDiffuse: { value: null }, tRefl: { value: null }, uTexel: { value: new THREE.Vector2() } },
@@ -298,10 +376,26 @@ const SSRCompositeShader = {
  * costs a quarter as much and looks the same.
  */
 class SSRPass extends Pass {
-  constructor(depthTexture, scale = 0.5) {
+  constructor(depthTexture, camera, scale = 0.5) {
     super();
     this.scale = scale;
-    this.target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
+    this.camera = camera;
+    const opts = { type: THREE.HalfFloatType, depthBuffer: false };
+    this.target = new THREE.WebGLRenderTarget(1, 1, opts);
+    /* Two history buffers, read one and write the other. Reading and writing
+       the same texture in a single draw is undefined, and on this hardware it
+       is undefined in the most expensive way: it appears to work. */
+    this.hist = [new THREE.WebGLRenderTarget(1, 1, opts), new THREE.WebGLRenderTarget(1, 1, opts)];
+    this.flip = 0;
+    this.primed = false;
+    this.keep = 0.82;
+    this.prevViewProj = new THREE.Matrix4();
+    this.resolve = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.clone(SSRResolveShader.uniforms),
+      vertexShader: SSRResolveShader.vertexShader,
+      fragmentShader: SSRResolveShader.fragmentShader,
+    });
+    this.resolve.uniforms.tDepth.value = depthTexture;
     this.material = new THREE.ShaderMaterial({
       uniforms: THREE.UniformsUtils.clone(SSRShader.uniforms),
       vertexShader: SSRShader.vertexShader,
@@ -315,28 +409,65 @@ class SSRPass extends Pass {
     });
     this.quadA = new FullScreenQuad(this.material);
     this.quadB = new FullScreenQuad(this.composite);
+    this.quadR = new FullScreenQuad(this.resolve);
   }
 
   setSize(w, h) {
     const sw = Math.max(2, Math.floor(w * this.scale));
     const sh = Math.max(2, Math.floor(h * this.scale));
     this.target.setSize(sw, sh);
+    this.hist[0].setSize(sw, sh);
+    this.hist[1].setSize(sw, sh);
+    this.primed = false;
     // the march walks pixels, so it has to know how many there are
     this.material.uniforms.uRes.value.set(sw, sh);
     this.composite.uniforms.uTexel.value.set(1 / sw, 1 / sh);
+    this.resolve.uniforms.uTexel.value.set(1 / sw, 1 / sh);
   }
 
   render(renderer, writeBuffer, readBuffer) {
+    /* A dry road mirrors nothing, and the march knows it — every pixel takes
+       the early exit. What was still being paid for was everything around it:
+       a full-screen composite doing nine texture reads per pixel to blend a
+       reflection that is zero everywhere. Standing the pass down entirely means
+       leaving the picture where it is, which is what needsSwap is for: the
+       composer keeps the current buffer and the next pass reads it untouched. */
+    this.needsSwap = this.material.uniforms.uWet.value >= 0.01;
+    if (!this.needsSwap) { this.primed = false; return; }
+
     this.material.uniforms.tDiffuse.value = readBuffer.texture;
     renderer.setRenderTarget(this.target);
     renderer.clear();
     this.quadA.render(renderer);
 
+    const prev = this.hist[this.flip];
+    const next = this.hist[this.flip ^ 1];
+    this.flip ^= 1;
+    const u = this.resolve.uniforms;
+    u.tCur.value = this.target.texture;
+    u.tHist.value = prev.texture;
+    u.uInvProj.value.copy(this.camera.projectionMatrixInverse);
+    u.uInvView.value.copy(this.camera.matrixWorld);
+    u.uPrevViewProj.value.copy(this.prevViewProj);
+    /* Nothing to carry over on the first frame, and nothing to carry over
+       through a teleport either — the camera lands somewhere else entirely and
+       every reprojected pixel is a lie the clamp has to work to undo. */
+    u.uKeep.value = this.primed ? this.keep : 0;
+    this.primed = true;
+    renderer.setRenderTarget(next);
+    renderer.clear();
+    this.quadR.render(renderer);
+
     this.composite.uniforms.tDiffuse.value = readBuffer.texture;
-    this.composite.uniforms.tRefl.value = this.target.texture;
+    this.composite.uniforms.tRefl.value = next.texture;
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
     if (this.clear) renderer.clear();
     this.quadB.render(renderer);
+
+    this.prevViewProj
+      .copy(this.camera.projectionMatrix)
+      .multiply(this.camera.matrixWorldInverse);
+    this.resolved = next;
   }
 
   /**
@@ -371,8 +502,11 @@ class SSRPass extends Pass {
 
   dispose() {
     this.target.dispose();
+    this.hist[0].dispose();
+    this.hist[1].dispose();
     this.quadA.dispose();
     this.quadB.dispose();
+    this.quadR.dispose();
   }
 }
 
@@ -543,7 +677,7 @@ export function createComposer(renderer, scene, camera, quality = {}) {
   composer.renderTarget2.depthTexture = target.depthTexture;
   composer.addPass(new RenderPass(scene, camera));
 
-  const ssr = new SSRPass(target.depthTexture);
+  const ssr = new SSRPass(target.depthTexture, camera);
   composer.addPass(ssr);
 
   /* Leave the threshold alone. Raising it from 0.42 to 0.70 to shrink the halo
@@ -560,5 +694,19 @@ export function createComposer(renderer, scene, camera, quality = {}) {
   composer.addPass(grade);
   composer.addPass(new OutputPass());
 
-  return { composer, bloom, grade, ssr };
+  /* After the output pass, deliberately.
+     SMAA decides what is an edge by comparing the brightness of neighbouring
+     pixels against a fixed threshold, and that threshold is only meaningful on
+     values a screen could show. Everything upstream of OutputPass is linear and
+     open-ended — a street lamp sits at 12 and the tarmac at 0.02, so every lamp
+     is one enormous edge and the kerb beside it is none at all. Tone mapping
+     first puts the whole picture back in 0..1 where the threshold means what it
+     says. The cost is that the grain from the grade pass is in the picture by
+     then, and grain is edges; the threshold is raised a little to look past it. */
+  const smaa = new SMAAPass();
+  smaa._materialEdges.defines.SMAA_THRESHOLD = '0.14';   // stock 0.1; grain lives below it
+  smaa.enabled = !!quality.smaa;
+  composer.addPass(smaa);
+
+  return { composer, bloom, grade, ssr, smaa };
 }

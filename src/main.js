@@ -46,11 +46,7 @@ scene.fog = new THREE.FogExp2(0x06070f, 0.0066);
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.7, 5200);
 camera.position.set(0, 3, 8);
 
-const { composer, bloom, grade, ssr } = createComposer(renderer, scene, camera, quality);
-/* The guard only calls applyTier when it changes something, so the starting
-   profile has to be handed over once by hand. */
-ssr.material.uniforms.uSteps.value = quality.ssrSteps;
-ssr.enabled = quality.ssrSteps > 0;
+const { composer, bloom, grade, ssr, smaa } = createComposer(renderer, scene, camera, quality);
 
 /* ── world ─────────────────────────────────────────────────── */
 scene.add(assets().glowField.mesh);     // every glow in the game, one draw call
@@ -106,11 +102,11 @@ const photo = new PhotoMode({ camera, renderer, scene, composer, canvas });
 /* ?stream=1 turns the game into a channel: autopilot only, gentler pace,
    the interface replaced by a station ident. */
 const stream = new StreamMode();
-/* Instrumentation, never on a broadcast: ?dev=1 or F3. */
+/* Instrumentation, never on a broadcast: ?dev=1 or the backquote key. */
 const dev = new DevHud();
 const gpu = new GpuTime(renderer);
-/* What the F-keys have switched off. Applied every frame because the road is
-   rebuilt as you ride and new chunks would otherwise come back lit. */
+/* What the debug keys have switched off. Applied every frame because the road
+   is rebuilt as you ride and new chunks would otherwise come back lit. */
 const debugOff = { shafts: false, decals: false };
 let decalsHidden = false;
 let shaftsHidden = false;
@@ -347,7 +343,11 @@ document.addEventListener('keydown', (e) => {
  */
 const viewSize = new THREE.Vector2();
 function applyTier(tier) {
-  renderer.setPixelRatio(Math.min(devicePixelRatio, tier.pixelRatio));
+  /* Two ceilings at once: how dense the buffer may be, and how big it may get
+     in absolute terms. The second one only bites on a large window, which is
+     exactly where the first one stopped helping. */
+  const cap = Math.sqrt(tier.maxPixels / Math.max(1, innerWidth * innerHeight));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, tier.pixelRatio, cap));
   renderer.setSize(innerWidth, innerHeight);
   // in drawing-buffer pixels, or the post chain silently halves on HiDPI
   renderer.getDrawingBufferSize(viewSize);
@@ -358,8 +358,40 @@ function applyTier(tier) {
   ssr.material.uniforms.uSteps.value = tier.ssrSteps;
   ssr.enabled = tier.ssrSteps > 0;
   ssr.setSize(viewSize.x, viewSize.y);
+  smaa.enabled = !!tier.smaa;
+  grade.uniforms.uTaps.value = tier.gradeTaps;
+  setSamples(tier.samples);
+}
+
+/**
+ * Multisampling, which used to be the one setting a step-down could not reach.
+ *
+ * It is fixed when the render target's framebuffer is built, so a machine that
+ * started optimistic and was stepped down twice kept the most expensive setting
+ * of the profile it had left — the panel would say "low" and "2x msaa" on the
+ * same screen. Changing the count and disposing the target makes the renderer
+ * build it again with the new one; the GPU-side objects go, the JavaScript ones
+ * stay, and the pass wiring that points at them is untouched.
+ */
+function setSamples(n) {
+  if (composer.renderTarget1.samples === n) return;
+  for (const rt of [composer.renderTarget1, composer.renderTarget2]) {
+    rt.samples = n;
+    rt.dispose();
+  }
 }
 const guard = new QualityGuard(quality.index, applyTier);
+/* The guard only calls applyTier when it changes something, so the starting
+   profile has to be handed over once by hand — and it has to go through the
+   same function the guard uses. It did not: the buffer density was set once
+   when the renderer was built and the rest of the profile was applied piecemeal
+   here, so two of the knobs reached a machine only if its frame rate was bad
+   enough to make the guard step down. A profile that is only half applied until
+   something goes wrong is worse than no profile. */
+applyTier(TIERS[quality.index]);
+
+/* The reflection-coverage readback is throttled; see where it is used. */
+let covAge = 99, covVal = 0;
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -721,6 +753,9 @@ function frame() {
   /* After the render, not before: renderer.info is reset at the top of the
      frame, so reading it earlier reports the previous frame as zero. */
   dev.update(dt, (worst) => {
+    /* eight panel updates apart, so roughly one stall every two seconds */
+    if (covAge++ >= 8) { covAge = 0; covVal = ssr.coverage(renderer); }
+    const coverage = () => covVal;
     const r = renderer.info;
     const f = assets().glowField;
     return {
@@ -736,10 +771,26 @@ function frame() {
         : 'off  (1)',
       /* Configured is not the same as working. This is the fraction of the road
          that actually found something to reflect: zero means the pass is doing
-         nothing, whatever the line above says. */
+         nothing, whatever the line above says.
+         Sampled every couple of seconds rather than every time the text is
+         rewritten. Reading pixels back stalls the pipeline until the GPU has
+         caught up, and at four times a second that put a spike into the frame
+         graph on the same cadence — an instrument loud enough to be mistaken
+         for the thing it was measuring. */
       reflected: !ssr.enabled ? '—'
         : ssr.material.uniforms.uWet.value < 0.01 ? 'dry road, nothing to mirror'
-          : `${(ssr.coverage(renderer) * 100).toFixed(0)}% of the road`,
+          : `${(coverage() * 100).toFixed(0)}% of the road`,
+      /* How many frames of reflection are being averaged together, rather than
+         the blend factor — 0.82 means nothing to anyone, five frames means
+         "expect a short trail behind a light going past". */
+      history: !ssr.enabled ? '—'
+        : ssr.keep > 0 ? `${(1 / (1 - ssr.keep)).toFixed(1)} frames of reflection`
+          : 'off — one ray per pixel, raw',
+      /* The multisampling count comes off the buffer rather than off the tier.
+         Multisampling is fixed when the render target is built, so a tier
+         stepped down at runtime still has whatever it started with — and the
+         tier table would report the wrong number with total confidence. */
+      edges: `${smaa.enabled ? 'smaa + ' : ''}${composer.renderTarget1.samples || 'no'}x msaa`,
       draws: `${r.render.calls}  ${(r.render.triangles / 1000).toFixed(1)}k tris`,
       /* Flicker scales with this: halve it and the lamps pulse half again as
          much. Shown because it is the one knob that trades frames for calm. */
@@ -836,12 +887,16 @@ function teleport(s, v = state.v) {
   road.point(s + cam.ahead, state.lat, 1.35, camLook);
   prevCamPos.copy(camPos);
   camVel.set(0, 0, 0);
+  /* The reflection's history belongs to a stretch of road that is now several
+     kilometres behind. Reprojecting it would drag one frame of the old place
+     across the new one. */
+  ssr.primed = false;
 }
 
 /* a handle for poking at the ride from the console */
 window.__mr = {
   THREE, renderer, scene, camera, road, bike, traffic, events, input, state,
-  teleport, setAuto, record, photo, composer, guard,
+  teleport, setAuto, record, photo, composer, guard, ssr, smaa,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },
