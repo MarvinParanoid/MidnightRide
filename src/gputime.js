@@ -25,6 +25,10 @@ export class GpuTime {
     this.pending = [];
     this.ms = 0;
     this.last = 0;
+    /* Set to an array by the benchmark to collect every reading with its tag;
+       left null in normal play so nothing accumulates. */
+    this.log = null;
+    this.nextTag = 0;
     this.active = false;
     /* set by the benchmark harness; see the render loop */
     this.forced = false;
@@ -38,6 +42,7 @@ export class GpuTime {
     const gl = this.gl;
     this.query = gl.createQuery();
     gl.beginQuery(this.ext.TIME_ELAPSED_EXT, this.query);
+    this.queryTag = this.nextTag;
     this.active = true;
   }
 
@@ -45,7 +50,7 @@ export class GpuTime {
     if (!this.active) return;
     const gl = this.gl;
     gl.endQuery(this.ext.TIME_ELAPSED_EXT);
-    this.pending.push(this.query);
+    this.pending.push({ q: this.query, tag: this.queryTag });
     this.active = false;
     this.poll();
   }
@@ -56,7 +61,7 @@ export class GpuTime {
        the queue. The queue is bounded because a query is only added once a
        frame and removed as soon as it resolves. */
     while (this.pending.length) {
-      const q = this.pending[0];
+      const { q, tag } = this.pending[0];
       if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) break;
       this.pending.shift();
       const disjoint = gl.getParameter(this.ext.GPU_DISJOINT_EXT);
@@ -71,6 +76,12 @@ export class GpuTime {
            worth finding. */
         this.last = ms;
         this.ms = this.ms ? this.ms * 0.85 + ms * 0.15 : ms;
+        /* Which frame this number came from, when anyone is asking. A result
+           arrives several frames after the work, so a benchmark alternating two
+           settings frame by frame cannot simply read the latest figure — it
+           would credit half of one setting's frames to the other. The tag rides
+           along with the query and comes back attached to the answer. */
+        if (this.log) this.log.push({ tag, ms });
       }
       gl.deleteQuery(q);
     }
@@ -82,6 +93,6 @@ export class GpuTime {
        single reading. The queue is bounded by construction — one query in per
        frame, and every resolved one leaves — so the cap is only a leak guard
        and can be generous. */
-    if (this.pending.length > 90) gl.deleteQuery(this.pending.shift());
+    if (this.pending.length > 90) gl.deleteQuery(this.pending.shift().q);
   }
 }

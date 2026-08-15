@@ -14,6 +14,7 @@
  *
  *   node tools/test/bench.mjs                 all scenes, all three profiles
  *   node tools/test/bench.mjs --tier high     one profile
+ *   node tools/test/bench.mjs --knobs         what each quality setting costs
  *   node tools/test/bench.mjs --sweep ssr     march length against coverage
  *   node tools/test/bench.mjs --soft          on SwiftShader, for comparison
  *   node tools/test/bench.mjs --shots         write a frame per scene
@@ -71,8 +72,8 @@ async function pinGuard(page) {
  * — the card idles down between bursts, and one reading cannot tell that from a
  * real change. Warm it up, then take every frame.
  */
-async function sample(page, n) {
-  await steps(page, 40);                     // clocks up, history converged
+async function sample(page, n, warm = 40) {
+  await steps(page, warm);                   // clocks up, history converged
   const frames = await page.evaluate(async (k) => {
     const m = window.__mr, out = [];
     for (let i = 0; i < k; i++) {
@@ -191,6 +192,155 @@ async function sweepSsr(browser) {
   return rows;
 }
 
+
+/**
+ * Price one knob, by asking the card the same question twice in a row.
+ *
+ * Comparing two runs of this file measured the same scene at 19.13 ms and then
+ * at 12.17 — a forty per cent spread with nothing changed between them. That is
+ * not measurement error to be averaged away, it is the graphics card changing
+ * its clocks between one run and the next, and no number of frames inside a run
+ * will see it. So stop comparing across runs. Alternate the two settings inside
+ * one run, over and over, and take the ratio within each pair: whatever the card
+ * was doing to its clocks that second, it was doing to both halves of the pair,
+ * and it divides out.
+ *
+ * What comes back is therefore a ratio and not a time. "Turning this off makes
+ * the frame 0.84 of what it was" survives being run tomorrow on a warm machine;
+ * "the frame took 12.17 ms" does not.
+ */
+async function paired(page, apply, base, variant, { frames = 260 } = {}) {
+  /* Alternate frame by frame, not sample by sample.
+     Sampling one setting for a while and then the other left the card's clocks
+     free to change in between, and they did: the same untouched profile
+     measured 26.7 ms in one row of this table and 50.2 in another. Frame by
+     frame there is no "in between" — whatever state the card is in, both
+     settings are measured in it. A null comparison of a profile against itself
+     is what says whether that worked, and it is the first row of the table. */
+  await apply(page, base);
+  await steps(page, 30);
+  await apply(page, variant);
+  await steps(page, 30);          // both shader sets compiled, both buffers sized
+
+  const log = await page.evaluate(async (n) => {
+    const m = window.__mr;
+    m.gpu.log = [];
+    for (let i = 0; i < n; i++) {
+      m.gpu.nextTag = i % 2;
+      window.__apply(i % 2);
+      await m.record.next();
+    }
+    const out = m.gpu.log;
+    m.gpu.log = null;
+    return out;
+  }, frames);
+
+  const pull = (t) => log.filter((e) => e.tag === t && e.ms > 0)
+    .map((e) => e.ms).sort((a, b) => a - b);
+  const A = pull(0), B = pull(1);
+  const med = (v) => (v.length ? v[Math.floor(v.length / 2)] : 0);
+  const q = (v, p) => (v.length ? v[Math.floor((v.length - 1) * p)] : 0);
+  const a = med(A), b = med(B);
+  /* The spread quoted is the two medians' own uncertainty, taken from the
+     quartiles of each side divided by the root of the count — not the spread of
+     single frames, which is dominated by the card and says nothing about
+     whether the two settings differ. */
+  const err = (v) => (v.length ? (q(v, 0.75) - q(v, 0.25)) / 2 / Math.sqrt(v.length) : 0);
+  const rel = a > 0 ? Math.hypot(err(A) / a, err(B) / a) : 0;
+  return {
+    reads: A.length + B.length,
+    ratio: a > 0 ? +(b / a).toFixed(3) : 0,
+    lo: a > 0 ? +(b / a - 2 * rel).toFixed(3) : 0,
+    hi: a > 0 ? +(b / a + 2 * rel).toFixed(3) : 0,
+    baseMs: +a.toFixed(2),
+    variantMs: +b.toFixed(2),
+  };
+}
+
+/* Every setting the quality ladder moves, one at a time, against an untouched
+   high profile. This is the table the ladder should be rebuilt from: today it
+   drops five of these at once and one of them — the bloom buffer — is known to
+   make flicker worse, so it wants spending last rather than in the same breath
+   as the others. */
+const KNOBS = [
+  /* The null row: the same profile against itself. It must come out at 1.00,
+     and how far it strays is the smallest difference this rig can see. Any row
+     below it is noise being read as a result — which is what the first version
+     of this table did, reporting that switching the reflection pass off made
+     the frame fifteen per cent slower. */
+  { name: '(nothing changed)', over: {} },
+  { name: 'pixels: 2.07 -> 1.0 Mpx', over: { maxPixels: 1.0e6 } },
+  { name: 'pixels: 2.07 -> 0.5 Mpx', over: { maxPixels: 0.5e6 } },
+  { name: 'msaa 2x -> off', over: { samples: 0 } },
+  { name: 'bloom buffer 1.5 -> 0.5', over: { bloomScale: 0.5 } },
+  { name: 'smaa off', over: { smaa: false } },
+  { name: 'grade taps 5 -> 3', over: { gradeTaps: 3 } },
+  { name: 'ssr 32 -> 12 steps', over: { ssrSteps: 12 } },
+  { name: 'ssr off', over: { ssrSteps: 0 } },
+  { name: 'ssr 32 -> 48 steps', over: { ssrSteps: 48 } },
+];
+
+async function priceKnobs(browser) {
+  /* A window big enough for the pixel ceiling to mean something. At the suite's
+     1152x648 the whole drawing buffer is 0.75 Mpx, under every cap in the
+     table, so the one knob with the most leverage would have measured as doing
+     nothing at all. */
+  const { page, errors } = await session(browser, { tier: 'high', width: 1920, height: 1080 });
+  await page.evaluate(() => { window.__mr.state.rainOverride = 1; window.__mr.gpu.forced = true; });
+  await pinGuard(page);
+  await settle(page, 640, { frames: 60 });
+  await freeze(page);
+
+  const apply = (p, over) => p.evaluate((o) => {
+    const m = window.__mr;
+    m.applyTier({ ...m.tiers[0], ...o });
+  }, over);
+
+  /* Installed once per knob so the switch inside the loop is a function call
+     rather than a devtools round trip, which would cost more than the frame.
+     And it switches the least it can. Re-applying the whole profile every frame
+     rebuilds the composer's buffers every frame, which is work neither setting
+     asks for and which swamped the cheap knobs — the row for a longer reflection
+     march came out cheaper than a shorter one, which is not a thing that can
+     happen. Structural settings still need the full apply; a uniform does not. */
+  const STRUCTURAL = ['maxPixels', 'samples', 'bloomScale', 'pixelRatio', 'rain'];
+  const install = (over) => page.evaluate(([o, structural]) => {
+    const m = window.__mr;
+    const heavy = Object.keys(o).some((k) => structural.includes(k));
+    const cfg = [{ ...m.tiers[0] }, { ...m.tiers[0], ...o }];
+    const light = (c) => {
+      m.ssr.material.uniforms.uSteps.value = c.ssrSteps;
+      m.ssr.enabled = c.ssrSteps > 0;
+      m.smaa.enabled = !!c.smaa;
+      const g = m.composer.passes.find((p) => p.material?.uniforms?.uTaps);
+      if (g) g.material.uniforms.uTaps.value = c.gradeTaps;
+    };
+    let at = -1;
+    window.__apply = (i) => {
+      if (i === at) return;
+      at = i;
+      if (heavy) m.applyTier(cfg[i]); else light(cfg[i]);
+    };
+  }, [over, STRUCTURAL]);
+
+  console.log('\nthe cost of each quality knob, city at 640 m, wet, 1920x1080');
+  console.log('paired against an untouched high profile — a ratio below 1 is cheaper\n');
+  console.log('  knob                        frame     spread        saves');
+  const rows = [];
+  for (const k of KNOBS) {
+    await install(k.over);
+    const r = await paired(page, apply, {}, k.over);
+    rows.push({ ...k, ...r });
+    const saved = r.baseMs - r.variantMs;
+    console.log(`  ${k.name.padEnd(26)} x${r.ratio.toFixed(2)}   ${r.lo.toFixed(2)}-${r.hi.toFixed(2)}   `
+      + `${saved >= 0 ? '' : '+'}${(-saved).toFixed(2)} ms of ${r.baseMs.toFixed(1)}   ${r.reads} reads`);
+  }
+  await page.evaluate(() => { const m = window.__mr; m.applyTier(m.tiers[0]); });
+  if (errors.length) console.log(`  ! ${errors[0]}`);
+  await page.close();
+  return rows;
+}
+
 async function main() {
   mkdirSync(DIR, { recursive: true });
   const soft = has('--soft');
@@ -211,7 +361,9 @@ async function main() {
         + ' the timings below are worthless\n');
     }
 
-    if (has('--sweep')) {
+    if (has('--knobs')) {
+      result.knobs = await priceKnobs(browser);
+    } else if (has('--sweep')) {
       result.sweep = await sweepSsr(browser);
     } else {
       const tiers = arg('--tier') ? [arg('--tier')] : ['high', 'mid', 'low'];

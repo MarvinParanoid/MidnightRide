@@ -946,6 +946,10 @@ function teleport(s, v = state.v) {
 window.__mr = {
   THREE, renderer, scene, camera, road, bike, traffic, events, input, state,
   teleport, setAuto, record, photo, composer, guard, ssr, smaa, sky, gpu,
+  /* The benchmark prices one knob at a time, and every knob it cares about is
+     an argument to this. Exposing the applier rather than a dozen setters keeps
+     the thing being measured identical to the thing that ships. */
+  applyTier, tiers: TIERS,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },

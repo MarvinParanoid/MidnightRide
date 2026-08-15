@@ -20,9 +20,19 @@ import { isTouchDevice } from './input.js';
    is the floor the picture itself sets. 1.5 reaches it; nothing above is worth
    paying for.
    The counts are higher than they look: the march walks pixels rather than
-   metres, so a step is a step of the projected line and forty-eight of them at
-   half resolution costs about what twenty did at full. Measured: reflections
-   are continuous from 48 up, and 64 adds almost nothing. */
+   metres, so a step is a step of the projected line.
+   Priced properly at last, by alternating step counts frame by frame on a real
+   card (tools/test/bench.mjs --knobs): twelve steps, thirty-two and forty-eight
+   all cost the same frame to within one per cent, while switching the pass off
+   entirely saves sixteen. The march is not what the reflection costs — the
+   half-resolution target, the temporal resolve and the full-screen composite
+   are, and those are paid the moment the pass runs at all. So the step count is
+   very nearly free and should be set by what it finds rather than by what it
+   costs: measured on a held frame in the city, coverage climbs 2.9% at 8 steps,
+   6.5% at 32, 8.2% at 48, 9.5% at 64, still rising.
+   High therefore marches 48. The other two are left where they are on purpose:
+   this was measured on one integrated Radeon, and "free" is a claim about a
+   graphics card, not about arithmetic. */
 /* bloomScale is the resolution of the bloom's own buffer, and it turned out to
    be what makes street lamps flicker. Measured over forty consecutive frames of
    the same drive, the frame-to-frame jitter of the light above the horizon:
@@ -46,7 +56,7 @@ import { isTouchDevice } from './input.js';
    it and the one least able to pay — and it is reached by stepping down from a
    frame rate that was already poor. Edges lose. */
 export const TIERS = [
-  { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 32, smaa: true, maxPixels: 3.3e6, gradeTaps: 5 },
+  { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 48, smaa: true, maxPixels: 3.3e6, gradeTaps: 5 },
   { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 22, smaa: true, maxPixels: 2.2e6, gradeTaps: 4 },
   { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12, smaa: false, maxPixels: 1.4e6, gradeTaps: 3 },
 ];
