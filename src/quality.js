@@ -73,10 +73,20 @@ import { isTouchDevice } from './input.js';
    ten per cent — switching three structural settings frame by frame measures
    the composer reallocating its buffers as much as it measures the frame.
    All of which the resolution controller makes moot: it finds the number at
-   runtime, on the machine in front of it, instead of it being guessed here. */
+   runtime, on the machine in front of it, instead of it being guessed here.
+   And smaa is now the low profile's alone. The other two have hardware
+   multisampling, which resolves geometric edges properly and is paid for once
+   rather than per pass; measured on top of it, smaa cost 18% of the frame and
+   returned the staircase down 7% with the picture's own fine detail down 7%
+   alongside it. It was not sharpening edges selectively, it was softening
+   everything by about the same amount — which is what a full-screen filter does
+   when the edges have already been dealt with. Reported from the saddle as "the
+   picture has gone soapier, even on high", and it was two things at once: this
+   and the resolution controller buying headroom nobody asked for.
+   Low has no multisampling and no other answer, so there it earns its keep. */
 export const TIERS = [
-  { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 48, smaa: true, maxPixels: 3.3e6, gradeTaps: 5 },
-  { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 22, smaa: true, maxPixels: 2.2e6, gradeTaps: 4 },
+  { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 48, smaa: false, maxPixels: 3.3e6, gradeTaps: 5 },
+  { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 22, smaa: false, maxPixels: 2.2e6, gradeTaps: 4 },
   { name: 'low', pixelRatio: 1.0, bloomScale: 1.0, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12, smaa: true, maxPixels: 0.9e6, gradeTaps: 3 },
 ];
 
