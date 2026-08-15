@@ -86,7 +86,8 @@ const state = {
   enclosure: 0,
   remote: 0,          // 0 in town, 1 deep in a long empty haul
   beat: 0,
-  rain: 0,
+  rain: 0,           // what is falling out of the sky right now
+  wet: 0,            // how wet the road is, which lags behind it
   auto: false,        // autopilot has the controls
   lastInput: 0,
   autoCamT: 0,
@@ -191,7 +192,7 @@ function controls(dt, now) {
       state.autoCamT = pacer.camHold;               // shorter holds while pressing on
       state.camMode = (state.camMode + 1) % CAM_MODES.length;
     }
-    const out = auto.update(dt, state, road, traffic, { rain: state.rain, pace: pacer.scale, closedLane: events.closedLane });
+    const out = auto.update(dt, state, road, traffic, { rain: state.wet, pace: pacer.scale, closedLane: events.closedLane });
     bike.signal = auto.signal;
     if (auto.wantFlash) { auto.wantFlash = false; bike.flash(1); }
     return out;
@@ -210,7 +211,7 @@ function controls(dt, now) {
       state.autoCamT = 30 + Math.random() * 30;
       state.camMode = (state.camMode + 1) % CAM_MODES.length;
     }
-    const out = auto.update(dt, state, road, traffic, { rain: state.rain, closedLane: events.closedLane });
+    const out = auto.update(dt, state, road, traffic, { rain: state.wet, closedLane: events.closedLane });
     bike.signal = auto.signal;
     if (auto.wantFlash) { auto.wantFlash = false; bike.flash(1); }
     return out;
@@ -564,14 +565,29 @@ function updateWorld(dt, now) {
     if (wasWet !== null) hud.toast(wetNow ? 'RAIN' : 'RAIN EASING');
     wasWet = wetNow;
   }
+  /* Falling rain and a wet road are two different things, and until now they
+     were one number. The moment a shower stopped, every reflection on the road
+     went out with it — which is not what tarmac does. It soaks in seconds and
+     dries in minutes, and that lag is most of what makes a road look like it
+     has been rained on rather than like it has a setting applied to it.
+     Two time constants: about seven seconds to wet, about forty to dry. Forty
+     is chosen against the weather above rather than against the real world,
+     where it would be a good deal longer — showers here come a couple of
+     minutes apart, so a road that took five minutes to dry would simply be wet
+     for the whole ride, and the variety just built would be invisible. At this
+     rate a short break leaves the road damp and a long one dries it out. */
+  state.wet = damp(state.wet, rainAmount, rainAmount > state.wet ? 0.14 : 0.024, dt);
+  const wet = state.wet;
+
   scene.fog.color.copy(pal.fog);
   scene.fog.density = pal.density * weather.fogMul * (1 - state.enclosure * 0.45)
     * (1 + rainAmount * 0.18) * (1 - state.remote * 0.22);
   renderer.setClearColor(pal.fog, 1);
 
-  a.asphalt.roughness = 0.5 - rainAmount * 0.26;
-  a.asphalt.metalness = 0.28 + rainAmount * 0.3;
-  a.asphalt.envMapIntensity = 0.7 + rainAmount * 1.5;
+  /* the surface, so these follow the road and not the sky */
+  a.asphalt.roughness = 0.5 - wet * 0.26;
+  a.asphalt.metalness = 0.28 + wet * 0.3;
+  a.asphalt.envMapIntensity = 0.7 + wet * 1.5;
 
   road.poseAt(state.s + 40, camLookPose);
   headingVec.set(Math.sin(camLookPose.h), 0, -Math.cos(camLookPose.h));
@@ -591,7 +607,7 @@ function updateWorld(dt, now) {
   rain.update(dt, camera.position, camVel, rainAmount, state.enclosure, now);
   traffic.update(dt, state.s, state.lat, state.v);
 
-  return { pal, rainAmount, biome };
+  return { pal, rainAmount, wet, biome };
 }
 
 /* ── recording ─────────────────────────────────────────────────
@@ -679,7 +695,7 @@ function frame() {
     events.rebase(off);
   }
 
-  const { rainAmount, biome } = updateWorld(simDt, now);
+  const { rainAmount, wet, biome } = updateWorld(simDt, now);
 
   /* place the bike */
   road.point(state.s, state.lat, 0, tmpA);
@@ -693,7 +709,7 @@ function frame() {
     throttle: state.throttle,
     brake: state.brake,
     rpm: engine ? engine.rpm : 1200,
-    rain: rainAmount,
+    rain: wet,                     // spray comes off standing water, not out of the air
     wobble: offRoad ? Math.sin(now * 42) * state.v : 0,
     beamFade: beamFade(tmpA, p.h),
   });
@@ -708,7 +724,7 @@ function frame() {
       kmh,
       throttle: state.throttle,
       brake: state.brake,
-      rain: rainAmount,
+      rain: wet,                   // tyre roar is the surface, not the shower
       enclosure: state.enclosure,
       offRoad,
       musicEnergy: music.enabled ? music.energy : 0,
@@ -764,7 +780,7 @@ function frame() {
   ssr.material.uniforms.uInvProj.value.copy(camera.projectionMatrixInverse);
   ssr.material.uniforms.uUpView.value
     .set(0, 1, 0).transformDirection(camera.matrixWorldInverse).normalize();
-  ssr.material.uniforms.uWet.value = clamp(rainAmount * 1.2, 0, 1) * (1 - state.enclosure * 0.7);
+  ssr.material.uniforms.uWet.value = clamp(wet * 1.2, 0, 1) * (1 - state.enclosure * 0.7);
   grade.uniforms.uGrain.value = (state.photo ? 0.006 : 0.014) * (record.active ? record.grain : 1);
 
   assets().glowField.update(scene);
@@ -823,7 +839,8 @@ function frame() {
       glows: `${f.mesh.count} of ${f.max}`,
       where: `${biome}  ${(state.s / 1000).toFixed(2)} km  lat ${state.lat.toFixed(2)}`,
       speed: `${(state.v * 3.6).toFixed(0)} km/h`,
-      rain: `${rainAmount.toFixed(2)}  enclosure ${state.enclosure.toFixed(2)}`,
+      rain: `${rainAmount.toFixed(2)} falling  ${state.wet.toFixed(2)} on the road  `
+        + `enclosure ${state.enclosure.toFixed(2)}`,
       radio: music ? `${music.stationName}  ${Math.round(music.bpm)} bpm` : 'off',
       energy: music ? music.energy.toFixed(2) : '—',
     };
@@ -911,6 +928,11 @@ function teleport(s, v = state.v) {
   road.point(s + cam.ahead, state.lat, 1.35, camLook);
   prevCamPos.copy(camPos);
   camVel.set(0, 0, 0);
+  /* A teleport is a different piece of road, not the same one a minute later,
+     so the surface arrives already in whatever state that place is in. Letting
+     it soak in from zero would also make every measurement here depend on how
+     many frames the harness happened to run after jumping. */
+  state.wet = state.rainOverride ?? rainAt(s, weather);
   /* The reflection's history belongs to a stretch of road that is now several
      kilometres behind. Reprojecting it would drag one frame of the old place
      across the new one. */
