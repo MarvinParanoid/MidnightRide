@@ -461,8 +461,20 @@ function city(ctx) {
            piled them into a saturated slab with a hard rim — which reads as a
            painted rectangle, not as a reflection. */
         if (rnd() < 0.45) {
-          const rp = ctx.at(s, side * (ROAD_HALF - 1.5 - rnd() * 3), 0.02);
-          ctx.pool(hex, 0.4).decal(rp, ctx.right(s), ctx.forward(s), 9, 18, 0.02);
+          /* Sized from the sign, not from the road.
+             It was a flat nine by eighteen metres for every sign there was —
+             wider than a lane and a half, thrown across the centreline, from
+             two or three metres of glowing characters on a wall twenty metres
+             back. A reflection is an image of its source and a small source
+             makes a small one; at that size it stopped reading as a reflection
+             and became a coloured patch painted on the tarmac.
+             Kept on the sign's own side of the road, too: light from a wall on
+             your right has no business lying in the far lane. */
+          const size = Math.max(sw, sh);
+          const wide = 2.2 + size * 1.3;
+          const long = wide * 2.2;
+          const rp = ctx.at(s, side * (ROAD_HALF - 0.5 - rnd() * 2), 0.02);
+          ctx.pool(hex, 0.3).decal(rp, ctx.right(s), ctx.forward(s), wide, long, 0.02);
         }
       }
       d += w + 2 + rnd() * 10;
