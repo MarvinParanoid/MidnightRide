@@ -33,13 +33,27 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** The frozen wall clock: a Tuesday in October, 23:40 local. */
 export const FROZEN_TIME = Date.UTC(2025, 9, 14, 21, 40, 0);
 
-export async function launch() {
+/**
+ * @param gpu  render on the machine's actual graphics card instead of on the
+ *             CPU. Off by default and it must stay that way for the golden
+ *             frames: SwiftShader draws the same bytes on every machine, which
+ *             is the whole basis of comparing a screenshot against a recording.
+ *             A real GPU draws its own bytes, so a golden recorded on this card
+ *             means nothing on another one — but it is the only way to get a
+ *             frame time that is worth anything, since on SwiftShader the cost
+ *             of filling a pixel bears no relation to what a GPU charges. So:
+ *             correctness tests on the software renderer, performance on the
+ *             hardware one, and never the two confused.
+ */
+export async function launch({ gpu = false } = {}) {
+  const soft = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+  const hard = ['--use-angle=vulkan', '--enable-features=Vulkan', '--enable-gpu'];
   return puppeteer.launch({
     executablePath: CHROME,
     headless: true,
     protocolTimeout: 600000,     // whole-drive scans live in one evaluate
-    args: ['--headless=new', '--use-gl=angle', '--use-angle=swiftshader',
-      '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox',
+    args: ['--headless=new', ...(gpu ? hard : soft),
+      '--ignore-gpu-blocklist', '--no-sandbox',
       '--autoplay-policy=no-user-gesture-required', '--hide-scrollbars'],
   });
 }
@@ -84,6 +98,11 @@ export async function session(browser, { width = 1152, height = 648, seed = 2026
        was enough to leave the two runs 0.0007 apart in lane position and 0.01 s
        apart in event timers. A frozen monotonic clock makes that frame a
        zero-length one; record mode supplies every dt after it. */
+    /* The frozen clock is what makes a run reproducible — but a benchmark has
+       to be able to time something, and a benchmark that reports zero
+       milliseconds is worse than one that reports nothing at all. Keep the real
+       one to hand under a name nothing in src/ knows about. */
+    window.__realNow = performance.now.bind(performance);
     performance.now = () => 0;
 
     const Real = Date;

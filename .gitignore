@@ -5,3 +5,10 @@ dist-itch
 .wrangler
 *.zip
 tests/golden/*.actual.png
+
+# Benchmark output, not benchmark code. The screenshots are megabytes of one
+# particular graphics card's opinion, and latest.json is a set of timings from
+# one integrated Radeon with a forty per cent run-to-run spread. Committing them
+# invites the exact mistake the tool exists to prevent — comparing numbers that
+# were never comparable. tools/test/bench.mjs is the part worth keeping.
+tests/bench/

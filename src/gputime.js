@@ -24,7 +24,10 @@ export class GpuTime {
     this.ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
     this.pending = [];
     this.ms = 0;
+    this.last = 0;
     this.active = false;
+    /* set by the benchmark harness; see the render loop */
+    this.forced = false;
     /* Not on every browser: it was pulled from Chrome and Firefox in 2016 over
        a timing-attack worry and only came back to desktop Chrome. */
     this.supported = !!this.ext;
@@ -60,11 +63,25 @@ export class GpuTime {
       if (!disjoint) {
         const ns = gl.getQueryParameter(q, gl.QUERY_RESULT);
         const ms = ns / 1e6;
-        // smoothed, because a single frame's number bounces around
+        /* Both are wanted. The smoothed one is for a human reading a panel,
+           where a number rewriting itself sixty times a second is unreadable;
+           the raw one is for the benchmark, which wants the distribution and
+           can do its own statistics — a median of raw frames says something a
+           smoothed reading cannot, because smoothing hides exactly the spikes
+           worth finding. */
+        this.last = ms;
         this.ms = this.ms ? this.ms * 0.85 + ms * 0.15 : ms;
       }
       gl.deleteQuery(q);
     }
-    if (this.pending.length > 8) gl.deleteQuery(this.pending.shift());
+    /* The cap used to be eight, which was chosen on the assumption that a
+       result comes back within a frame or three. Measured in a headless run on
+       an integrated Radeon: one query in ninety resolved before being thrown
+       away, so the panel was showing a number sampled roughly once every three
+       seconds and the benchmark thought it had a distribution when it had a
+       single reading. The queue is bounded by construction — one query in per
+       frame, and every resolved one leaves — so the cap is only a leak guard
+       and can be generous. */
+    if (this.pending.length > 90) gl.deleteQuery(this.pending.shift());
   }
 }

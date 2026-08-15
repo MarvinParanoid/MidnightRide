@@ -785,10 +785,13 @@ function frame() {
 
   assets().glowField.update(scene);
   /* Only while the panel is open: a timer query is cheap but not free, and a
-     player who never opens it should not pay for the instrumentation. */
-  if (dev.on) gpu.begin();
+     player who never opens it should not pay for the instrumentation. The
+     benchmark harness sets `forced`, because it wants the number without the
+     panel that would otherwise be drawing itself into the measurement. */
+  const timing = dev.on || gpu.forced;
+  if (timing) gpu.begin();
   composer.render();
-  if (dev.on) gpu.end();
+  if (timing) gpu.end();
 
   /* After the render, not before: renderer.info is reset at the top of the
      frame, so reading it earlier reports the previous frame as zero. */
@@ -942,7 +945,7 @@ function teleport(s, v = state.v) {
 /* a handle for poking at the ride from the console */
 window.__mr = {
   THREE, renderer, scene, camera, road, bike, traffic, events, input, state,
-  teleport, setAuto, record, photo, composer, guard, ssr, smaa, sky,
+  teleport, setAuto, record, photo, composer, guard, ssr, smaa, sky, gpu,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },
