@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { assets, neon } from './assets.js';
 import { clamp, damp, smoothstep, mulberry32, MeshBuilder } from './geo.js';
 import { BIOME, VIEW_DIST, ROAD_HALF, SHOULDER } from './constants.js';
+import { riderFigure, beam } from './bike.js';
 
 /**
  * The things that happen maybe once in half an hour.
@@ -168,14 +169,23 @@ export class Events {
     const dark = new THREE.MeshStandardMaterial({
       color: 0x0b0d13, roughness: 0.4, metalness: 0.7, envMapIntensity: 1.2,
     });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.46, 1.8), dark);
-    body.position.y = 0.68;
-    const rider = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.42, 4, 8), dark);
-    rider.position.set(0, 1.16, 0.2);
-    rider.rotation.x = -0.5;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), dark);
-    head.position.set(0, 1.45, -0.02);
-    lean.add(body, rider, head);
+    /* The machine, to the same measurements as the one you are sitting on.
+       It used to be a single box a metre and a half long with a capsule tipped
+       forward on top of it and a sphere for a head — which was defensible while
+       your own bike was a comparable pile of boxes, and stopped being defensible
+       the moment yours got a tank, a seat and a person on it. Anything sharing
+       the road has to be built to the same standard, or it reads as a different
+       game's asset wandering through. */
+    const frame = new MeshBuilder();
+    frame.box(0, 0.46, 0.16, 0.34, 0.34, 0.9, 0);        // engine
+    frame.box(0, 0.4, 0.62, 0.2, 0.12, 0.78, 0);         // swingarm
+    frame.box(0, 0.76, -0.06, 0.42, 0.3, 0.72, 0);       // tank
+    frame.box(0, 0.85, 0.44, 0.34, 0.14, 0.52, 0);       // seat
+    frame.box(0, 0.88, 0.78, 0.26, 0.22, 0.36, 0);       // tail
+    frame.box(0, 0.86, -0.5, 0.4, 0.44, 0.34, 0);        // fairing
+    frame.box(0, 0.78, 1.0, 0.2, 0.04, 0.34, 0);         // rear mudguard
+    lean.add(new THREE.Mesh(frame.build(), dark));
+    lean.add(new THREE.Mesh(riderFigure().build(), dark));
 
     /* Wheels. Left off originally on the theory that nobody sees them at night
        — but your own headlight lights this rider up as you close on him, and a
@@ -196,30 +206,44 @@ export class Events {
       this.rider.wheels.push(w);
     }
 
+    /* Fork and bar, raked the way a steering head is raked — top behind the
+       axle, tubes running down and forward to meet it. */
+    const barY = 0.63, barZ = 0.2, footY = 0.02;
+    const rake = Math.atan2(barZ, barY - footY);
+    const forkGeo = new THREE.CylinderGeometry(0.035, 0.045, Math.hypot(barZ, barY - footY), 6);
+    for (const dx of [-0.13, 0.13]) {
+      const f = new THREE.Mesh(forkGeo, metal);
+      f.position.set(dx, 0.33 + (footY + barY) / 2, -0.74 + barZ / 2);
+      f.rotation.x = rake;
+      lean.add(f);
+    }
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.05, 0.05), metal);
+    bar.position.set(0, 0.33 + barY, -0.74 + barZ);
+    lean.add(bar);
+
     const tail = new THREE.Mesh(
       new THREE.BoxGeometry(0.2, 0.07, 0.05),
       new THREE.MeshBasicMaterial({ color: neon(0xff1030, 2.4), toneMapped: false })
     );
-    tail.position.set(0, 0.92, 0.9);
+    tail.position.set(0, 0.9, 0.98);
     lean.add(tail);
-    const tailGlow = a.glowSprite(0xff1230, 1.5, 0.65);
-    tailGlow.position.copy(tail.position);
+    /* Clear of the tail bodywork and above the mudguard, or the depth test
+       trims the billboard to their silhouettes. */
+    const tailGlow = a.glowSprite(0xff1230, 1.5, 0.42);
+    tailGlow.position.set(0, 0.94, 1.04);
     lean.add(tailGlow);
     const headGlow = a.glowSprite(0xffeccf, 1.6, 0.6);
     headGlow.position.set(0, 0.86, -0.86);
     lean.add(headGlow);
     this.rider.headGlow = headGlow;
 
-    const cone = new THREE.Mesh(
-      new THREE.ConeGeometry(3.0, 26, 12, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: 0xfff1de, transparent: true, opacity: 0.022,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-        side: THREE.DoubleSide, fog: false, toneMapped: false,
-      })
-    );
-    cone.geometry.rotateX(Math.PI / 2);
-    cone.geometry.translate(0, 0, -13);
+    /* The same beam the player's headlight uses, rather than a cone of flat
+       opacity. A constant alpha does not fade towards the far end, so the open
+       mouth of the cone cuts off in mid-air: from behind, a rider a few dozen
+       metres ahead trailed a pale grey disc the size of the road, hanging above
+       it. The shader fades the beam out along its length, and the far end stops
+       existing instead of ending. */
+    const cone = beam(26, 3.0, 0.03, 0xfff1de);
     cone.position.set(0, 0.86, -0.88);
     lean.add(cone);
 

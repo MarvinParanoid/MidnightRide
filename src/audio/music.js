@@ -186,7 +186,7 @@ export class Music {
        bass first, then drums, the arp through the middle, the lead last. */
     const target = {
       pad: on * (0.92 - smoothstep(0.25, 0.85, e) * 0.34) * makeup * sec.pad,
-      arp: on * (0.08 + smoothstep(0.18, 0.58, e) * 0.6) * makeup * sec.arp,
+      arp: on * (0.08 + smoothstep(0.18, 0.58, e) * 0.6) * makeup * sec.arp * (st.arpLevel ?? 1),
       drums: on * smoothstep(0.16, 0.62, e) * 1.1 * sec.drums * (st.drums === 'none' ? 0 : 1),
       bass: on * smoothstep(0.03, 0.22, e) * 1.0 * st.bassMul,
       lead: on * smoothstep(0.55, 0.88, e) * 0.65 * sec.lead * (st.lead ? 1 : 0),

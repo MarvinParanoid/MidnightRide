@@ -21,7 +21,7 @@ const BEAM_VERT = /* glsl */ `
   }
 `;
 
-function beam(length, radius, opacity, color) {
+export function beam(length, radius, opacity, color) {
   const g = new THREE.ConeGeometry(radius, length, 18, 1, true);
   g.rotateX(Math.PI / 2);
   g.translate(0, 0, -length / 2);
@@ -92,7 +92,7 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
  * knees up against the tank with the feet back on the pegs — out of limbs that
  * join where a person's do.
  */
-function riderFigure() {
+export function riderFigure() {
   const mb = new MeshBuilder();
 
   const pelvis = V(0, 0.98, 0.44);
@@ -207,16 +207,29 @@ export class Bike {
     this.frontWheel.add(new THREE.Mesh(tyre, black), new THREE.Mesh(rim, chrome));
     this.frontWheel.add(new THREE.Mesh(disc, chrome));
 
-    /* fork */
-    const forkGeo = new THREE.CylinderGeometry(0.035, 0.04, 0.72, 6);
+    /* Fork.
+       The steering axis leans back, not forward: the triple clamp sits above
+       and behind the axle and the tubes run down and forward to meet it. This
+       was rotated the other way — a positive rotation about x tips the top of a
+       cylinder towards +z, which is the tail of this bike — so the fork raked
+       like nothing on the road, and being placed by eye rather than by its ends
+       it also met neither the axle nor the handlebar.
+       So derive it instead. The pivot sits on the front axle, which makes the
+       axle the origin here; the tubes span from just above it to just under the
+       bar, and the length and rake both fall out of those two points. */
+    const barY = 0.63, barZ = 0.2;
+    const footY = 0.02;
+    const rake = Math.atan2(barZ, barY - footY);        // ~17 degrees off vertical
+    const forkLen = Math.hypot(barZ, barY - footY);
+    const forkGeo = new THREE.CylinderGeometry(0.035, 0.045, forkLen, 6);
     for (const dx of [-0.13, 0.13]) {
       const f = new THREE.Mesh(forkGeo, chrome);
-      f.position.set(dx, 0.3, 0.09);
-      f.rotation.x = -0.42;
+      f.position.set(dx, (footY + barY) / 2, barZ / 2);
+      f.rotation.x = rake;
       this.steerPivot.add(f);
     }
     const bar = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.05, 0.05), chrome);
-    bar.position.set(0, 0.63, 0.2);
+    bar.position.set(0, barY, barZ);
     this.steerPivot.add(bar);
 
     /* ── body ───────────────────────────────────────────── */
@@ -326,8 +339,13 @@ export class Bike {
     const tail = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.07, 0.05), this.tailMat);
     tail.position.set(0, 0.93, 0.96);
     this.lean.add(tail);
+    /* Proud of the bodywork, not level with it. The lamp sits on the rear face
+       of the tail, and a billboard centred on that same plane has half its area
+       buried in the box behind it — the depth test then cuts the glow off along
+       the box's outline and it reads as a red rectangle with a black frame
+       rather than as a lamp. Four centimetres clear is enough. */
     this.tailGlow = a.glowSprite(0xff1230, 0.95, 0.32);
-    this.tailGlow.position.copy(tail.position);
+    this.tailGlow.position.set(0, 0.93, 1.0);
     this.lean.add(this.tailGlow);
 
     /* ── road spray thrown up by the rear wheel ─────────── */

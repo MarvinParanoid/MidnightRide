@@ -478,8 +478,18 @@ function updateCamera(dt) {
   accelSm = damp(accelSm, clamp(accel, -14, 12), 2.6, dt);
   const sideOffset = mode === 2 ? Math.sin(state.s * 0.0037) * 7 : 0;
 
+  /* The cinematic swing is seven metres either way, which on most of the road
+     lands the camera on the verge — the whole idea — and on the coast lands it
+     past the parapet. The seaward side of a coast chunk is where the ground
+     stops: there is a wall at ROAD_HALF + SHOULDER + 0.3 and then a five-metre
+     drop to the water, so a camera further out than that hangs over nothing and
+     looks back at the underside of the road. Keep it inboard of the wall. The
+     swing still reaches the verge everywhere else; it just stops going over the
+     edge of the world. */
+  const latLimit = ROAD_HALF + SHOULDER - 0.4;
+  const latWanted = state.lat * latMul + sideOffset;
   cam.back = damp(cam.back, back + accelSm * 0.16, lambda, dt);
-  cam.lat = damp(cam.lat, state.lat * latMul + sideOffset, lambda, dt);
+  cam.lat = damp(cam.lat, mode === 2 ? clamp(latWanted, -latLimit, latLimit) : latWanted, lambda, dt);
   cam.h = damp(cam.h, height, lambda * 0.8, dt);
   cam.ahead = damp(cam.ahead, ahead, lambda, dt);
 
@@ -896,7 +906,7 @@ function teleport(s, v = state.v) {
 /* a handle for poking at the ride from the console */
 window.__mr = {
   THREE, renderer, scene, camera, road, bike, traffic, events, input, state,
-  teleport, setAuto, record, photo, composer, guard, ssr, smaa,
+  teleport, setAuto, record, photo, composer, guard, ssr, smaa, sky,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },

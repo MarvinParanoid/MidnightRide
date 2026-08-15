@@ -248,7 +248,15 @@ export const STATIONS = {
       [[-5, 'maj7'], [0, 'min9'], [-7, 'maj7'], [-5, 'maj7']],
       [[0, 'sus4'], [0, 'min9'], [-4, 'maj7'], [-4, 'maj6']],
     ],
-    padCut: [300, 950], padOct: 12, arpOct: 24, arpRate: 4,
+    /* The arp was the loudest idea on the quietest station. Measured against
+       the others: two octaves up puts it at a median of 1245 Hz and a p90 of
+       1865, exactly where NIGHT FM's sits — but NIGHT FM has drums and a lead
+       playing over it and this has neither, so the same figure that reads as
+       sparkle there is the only thing happening here. An octave down and half
+       as often turns it back into what an empty road at three in the morning
+       wants: an occasional note, not a sequence. */
+    padCut: [300, 950], padOct: 12, arpOct: 12, arpRate: 8,
+    arpLevel: 0.62,
     lead: false, drums: 'none', hats: false, bassMul: 0.55, delayBeats: 1.5,
     level: 1.75,        // ambient is meant to sit lower, but not fall out of the mix
   },

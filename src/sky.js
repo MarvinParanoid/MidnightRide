@@ -143,11 +143,44 @@ export class Sky {
     scene.environmentIntensity = 0.55;
   }
 
+  /**
+   * What the environment map is actually a picture of.
+   *
+   * Rebaking it costs a cube render plus the convolution of the whole mip
+   * chain, all inside one frame — a single tall spike in the frame graph. It
+   * was being paid on a timer, whether or not there was anything new to bake,
+   * and most of the time there is not: the sky's colours move with the hour of
+   * the night, which is minutes of drifting, not seconds.
+   *
+   * The one thing that does move quickly is the direction of the city's glow,
+   * which swings as the road turns — so that gets a loose tolerance of about
+   * fifteen degrees rather than being ignored.
+   */
+  envState() {
+    const c = [this.uniforms.topColor.value, this.uniforms.bottomColor.value, this.uniforms.glowColor.value];
+    return [
+      ...c.flatMap((v) => [v.r, v.g, v.b]),
+      this.uniforms.glowStrength.value,
+      this.starMat.opacity,
+      this.moon.material.opacity,
+      this.uniforms.glowDir.value.x,
+      this.uniforms.glowDir.value.y,
+    ];
+  }
+
   refreshEnvironment(dt) {
     if (!this.pmrem) return;
     this.envAge += dt;
     if (this.envAge < this.envEvery) return;
     this.envAge = 0;
+
+    const now = this.envState();
+    if (this.envBaked) {
+      /* the last two are the glow direction, a unit vector, not a colour */
+      const moved = now.some((v, i) => Math.abs(v - this.envBaked[i]) > (i >= now.length - 2 ? 0.25 : 0.006));
+      if (!moved) return;
+    }
+    this.envBaked = now;
     /* fromScene() hands back a whole render target, not just a texture.
        Disposing only `.texture` leaves the framebuffer behind — one every few
        seconds, which is invisible in a play session and fatal in a stream that
