@@ -325,7 +325,22 @@ const SSRResolveShader = {
           lo = min(lo, t); hi = max(hi, t);
         }
       }
-      vec4 hist = clamp(texture2D(tHist, pUv), lo, hi);
+      vec4 hist = texture2D(tHist, pUv);
+      /* Clamp against the neighbourhood only when there is a neighbourhood to
+         clamp against.
+         The box is what stops a reflected tail light dragging a comet down the
+         road, and it is worth having. But this signal is one ray per pixel, so
+         a pixel whose whole three-by-three found nothing this frame has an
+         upper bound of zero — and clamping to that does not steady the history,
+         it deletes it. Which is exactly the frame where the history was the
+         only thing that knew a lamp was reflected there.
+         Standing still it never showed: the dither is fixed per pixel, so the
+         same pixels hit every frame and every neighbourhood is populated. Ride,
+         and the pattern moves under the reflection — reported from the saddle
+         as reflections that are there when stopped and gone when moving.
+         Where there is nothing to compare against, keep what we had; the blend
+         below still fades it out over about five frames. */
+      if (hi.a > 0.0) hist = clamp(hist, lo, hi);
       gl_FragColor = mix(cur, hist, uKeep);
     }
   `,
