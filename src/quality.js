@@ -63,13 +63,21 @@ import { isTouchDevice } from './input.js';
    and shrinking the bloom buffer to a third only x0.94 — while pixels are dead
    linear, x0.48 for half of them. So both are bought back and paid for out of
    resolution: smaa on, bloom buffer to 1.0, pixel ceiling 1.4 -> 1.05 Mpx.
-   Composed, that is x1.22 * x1.06 * x0.75, which lands within a few per cent of
-   where it was. Predicted from measurements rather than measured as a whole,
-   and worth confirming on a second card. */
+   Composed, that arithmetic said x0.97. Weighed as a whole profile it came out
+   x1.15 — the prediction was wrong by fifteen per cent, because ratios measured
+   against the high profile at two megapixels do not carry to a profile running
+   at one with no multisampling. Ratios do not compose across operating points.
+   The ceiling is 0.9 Mpx instead, which measured at x0.95 against the old
+   profile; a second reading at 0.82 Mpx came out at x1.05, which cannot be true
+   of fewer pixels and says the whole-profile comparison is only good to about
+   ten per cent — switching three structural settings frame by frame measures
+   the composer reallocating its buffers as much as it measures the frame.
+   All of which the resolution controller makes moot: it finds the number at
+   runtime, on the machine in front of it, instead of it being guessed here. */
 export const TIERS = [
   { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 48, smaa: true, maxPixels: 3.3e6, gradeTaps: 5 },
   { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 22, smaa: true, maxPixels: 2.2e6, gradeTaps: 4 },
-  { name: 'low', pixelRatio: 1.0, bloomScale: 1.0, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12, smaa: true, maxPixels: 1.05e6, gradeTaps: 3 },
+  { name: 'low', pixelRatio: 1.0, bloomScale: 1.0, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12, smaa: true, maxPixels: 0.9e6, gradeTaps: 3 },
 ];
 
 /** Where to start before we know anything. Phones start low; everything else high. */
@@ -93,6 +101,82 @@ const DOWN_FOR = 4;      // seconds of it before we believe it
 const UP_FPS = 80;
 const UP_FOR = 25;       // much longer, so it cannot oscillate
 const WARMUP = 3;        // shaders are still compiling; ignore the first frames
+
+
+/**
+ * Resolution, adjusted continuously, ahead of everything else.
+ *
+ * The profile ladder is three fixed presets and it waits four seconds before
+ * moving between them, which makes it a blunt instrument for a load that
+ * changes every few seconds — ride into a city in the rain and the frame rate
+ * falls, the ladder eventually drops five settings at once, and one of the five
+ * makes the lamps flicker worse than they did. Meanwhile the one setting that
+ * actually scales smoothly was pinned to whatever the preset said.
+ *
+ * Measured on a real card (tools/test/bench.mjs --knobs), the cost of a frame
+ * is very close to linear in the number of pixels in it: half the pixels came
+ * out at x0.48 and a quarter at x0.24. Nothing else in the renderer is that
+ * well behaved, so resolution is the right thing to spend first and the only
+ * one worth spending continuously.
+ *
+ * Two things keep it from being a nuisance. It reads the GPU's own timer where
+ * the browser has one, because wall-clock frame time on a vsynced display is
+ * quantised to the refresh interval and cannot tell 9 ms from 15. And it
+ * changes the buffer rarely — every change reallocates the whole post-processing
+ * chain, so a controller that nudged the size every frame would spend more than
+ * it saved.
+ */
+const SCALE_MIN = 0.55;      // below this the picture is soft enough to notice
+const SCALE_MAX = 1.0;       // never more than the profile already allows
+const AIM_MS = 13.5;         // comfortably inside a 60 Hz frame
+const HIGH_MS = 16.0;        // over this, give ground
+const LOW_MS = 9.5;          // under this, there is room to take some back
+const SETTLE = 0.8;          // seconds between changes: each one costs a reallocation
+const STEP_ENOUGH = 0.03;    // do not reallocate for a change nobody could see
+
+export class ResolutionGuard {
+  constructor(apply) {
+    this.apply = apply;
+    this.scale = 1;
+    this.applied = 1;
+    this.since = 0;
+    this.warm = 0;
+  }
+
+  /** Called once a frame. `gpuMs` is null when the browser has no timer query. */
+  update(dt, frameMs, gpuMs) {
+    this.warm += dt;
+    this.since += dt;
+    if (this.warm < WARMUP) return;
+
+    /* The GPU's own figure when there is one. Otherwise wall-clock, with the
+       target relaxed, because a vsynced 60 Hz frame reads as 16.7 ms whether
+       the work took two milliseconds or sixteen and only a frame that misses
+       says anything at all. */
+    const ms = gpuMs && gpuMs > 0 ? gpuMs : frameMs;
+    const slack = gpuMs && gpuMs > 0 ? 1 : 1.25;
+
+    if (ms > HIGH_MS * slack) this.scale *= 0.94;
+    else if (ms < LOW_MS * slack) this.scale *= 1.02;
+    else this.scale += (AIM_MS - ms) * 0.0008;     // creep towards the target
+
+    this.scale = Math.max(SCALE_MIN, Math.min(SCALE_MAX, this.scale));
+
+    if (this.since < SETTLE) return;
+    if (Math.abs(this.scale - this.applied) < STEP_ENOUGH) return;
+    this.since = 0;
+    this.applied = this.scale;
+    this.apply(this.applied);
+  }
+
+  /** A profile change rebuilds the buffers anyway; start it from the top. */
+  reset() {
+    this.scale = 1;
+    this.applied = 1;
+    this.since = 0;
+    this.warm = 0;
+  }
+}
 
 export class QualityGuard {
   constructor(index, apply) {

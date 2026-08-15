@@ -15,6 +15,7 @@
  *   node tools/test/bench.mjs                 all scenes, all three profiles
  *   node tools/test/bench.mjs --tier high     one profile
  *   node tools/test/bench.mjs --knobs         what each quality setting costs
+ *   node tools/test/bench.mjs --profile       two whole profiles, head to head
  *   node tools/test/bench.mjs --sweep ssr     march length against coverage
  *   node tools/test/bench.mjs --soft          on SwiftShader, for comparison
  *   node tools/test/bench.mjs --shots         write a frame per scene
@@ -341,6 +342,50 @@ async function priceKnobs(browser) {
   return rows;
 }
 
+
+/**
+ * Two whole profiles, head to head.
+ *
+ * The knob table prices settings one at a time, which is what you want when
+ * deciding what to spend — but a profile is several of them at once, and the
+ * arithmetic of multiplying their ratios together is a prediction, not a
+ * measurement. The low profile was rebalanced on exactly that arithmetic
+ * (antialiasing and a bigger bloom buffer, paid for out of resolution), so it
+ * needs the whole thing weighed rather than its parts.
+ */
+async function compareProfiles(browser, base, variant, label) {
+  const { page, errors } = await session(browser, { tier: 'low', width: 1920, height: 1080 });
+  await page.evaluate(() => { window.__mr.state.rainOverride = 1; window.__mr.gpu.forced = true; });
+  await pinGuard(page);
+  await settle(page, 640, { frames: 60 });
+  await freeze(page);
+
+  await page.evaluate(([a, b]) => {
+    const m = window.__mr;
+    const cfg = [{ ...m.tiers[2], ...a }, { ...m.tiers[2], ...b }];
+    let at = -1;
+    window.__apply = (i) => { if (i !== at) { at = i; m.applyTier(cfg[i]); } };
+  }, [base, variant]);
+
+  const apply = (p, over) => p.evaluate((o) => {
+    const m = window.__mr;
+    m.applyTier({ ...m.tiers[2], ...o });
+  }, over);
+
+  const r = await paired(page, apply, base, variant);
+  const shape = await page.evaluate(() => {
+    const gl = window.__mr.renderer.getContext();
+    return `${gl.drawingBufferWidth}x${gl.drawingBufferHeight}`;
+  });
+  console.log(`\n${label}\n`);
+  console.log(`  before  ${r.baseMs} ms`);
+  console.log(`  after   ${r.variantMs} ms   at ${shape}`);
+  console.log(`  ratio   x${r.ratio}  (${r.lo}-${r.hi}, ${r.reads} readings)`);
+  if (errors.length) console.log(`  ! ${errors[0]}`);
+  await page.close();
+  return { label, base, variant, ...r };
+}
+
 async function main() {
   mkdirSync(DIR, { recursive: true });
   const soft = has('--soft');
@@ -361,7 +406,15 @@ async function main() {
         + ' the timings below are worthless\n');
     }
 
-    if (has('--knobs')) {
+    if (has('--profile')) {
+      /* The low profile as it shipped yesterday against the low profile as it
+         ships now: no antialiasing of any kind and a third-size bloom buffer at
+         1.4 Mpx, versus smaa on and a full-size bloom buffer at 1.05. */
+      result.profile = await compareProfiles(browser,
+        { smaa: false, bloomScale: 0.5, maxPixels: 1.4e6 },
+        { smaa: true, bloomScale: 1.0, maxPixels: +(arg('--px', 0.9e6)) },
+        'the low profile, before and after the rebalance');
+    } else if (has('--knobs')) {
       result.knobs = await priceKnobs(browser);
     } else if (has('--sweep')) {
       result.sweep = await sweepSsr(browser);

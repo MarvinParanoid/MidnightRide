@@ -11,7 +11,7 @@ import { Events } from './events.js';
 import { createComposer, applyBloomScale } from './postfx.js';
 import { Input, isTouchDevice } from './input.js';
 import { Autopilot } from './autopilot.js';
-import { detectQuality, QualityGuard, TIERS } from './quality.js';
+import { detectQuality, QualityGuard, ResolutionGuard, TIERS } from './quality.js';
 import { PhotoMode } from './photo.js';
 import { StreamMode, StreamPacer } from './stream.js';
 import { Hud, formatClock } from './hud.js';
@@ -354,12 +354,15 @@ document.addEventListener('keydown', (e) => {
  * a change is invisible apart from the frame rate recovering.
  */
 const viewSize = new THREE.Vector2();
+let renderScale = 1;
 function applyTier(tier) {
   /* Two ceilings at once: how dense the buffer may be, and how big it may get
      in absolute terms. The second one only bites on a large window, which is
      exactly where the first one stopped helping. */
   const cap = Math.sqrt(tier.maxPixels / Math.max(1, innerWidth * innerHeight));
-  renderer.setPixelRatio(Math.min(devicePixelRatio, tier.pixelRatio, cap));
+  /* The profile sets the ceiling; the resolution controller decides how much of
+     it is actually spent, frame rate permitting. */
+  renderer.setPixelRatio(Math.min(devicePixelRatio, tier.pixelRatio, cap) * renderScale);
   renderer.setSize(innerWidth, innerHeight);
   // in drawing-buffer pixels, or the post chain silently halves on HiDPI
   renderer.getDrawingBufferSize(viewSize);
@@ -392,7 +395,13 @@ function setSamples(n) {
     rt.dispose();
   }
 }
-const guard = new QualityGuard(quality.index, applyTier);
+const guard = new QualityGuard(quality.index, (tier) => { res.reset(); applyTier(tier); });
+/* Resolution moves first and moves often; the profile ladder is what is left
+   for the settings that cannot be scaled a few per cent at a time. */
+const res = new ResolutionGuard((scale) => {
+  renderScale = scale;
+  applyTier(TIERS[guard.index]);
+});
 /* The guard only calls applyTier when it changes something, so the starting
    profile has to be handed over once by hand — and it has to go through the
    same function the guard uses. It did not: the buffer density was set once
@@ -820,6 +829,11 @@ function frame() {
          measures when the calls were queued, which is a different thing. */
       gpu: gpu.supported ? `${gpu.ms.toFixed(2)} ms` : 'no timer query in this browser',
       quality: `${guard.name}  ${guard.changes} change${guard.changes === 1 ? '' : 's'}`,
+      /* The profile is a ceiling and this is how much of it is being spent.
+         Without the line, a machine quietly running at three quarters
+         resolution looks like a machine with a soft renderer. */
+      scale: `${(res.applied * 100).toFixed(0)}% of the profile's pixels  `
+        + `${renderer.getContext().drawingBufferWidth}x${renderer.getContext().drawingBufferHeight}`,
       ssr: ssr.enabled
         ? `${ssr.material.uniforms.uSteps.value} steps @ ${ssr.target.width}x${ssr.target.height}`
         : 'off  (1)',
@@ -867,7 +881,17 @@ function frame() {
 
   /* let the frame rate decide the quality, but not while a recording or a
      photo pose is holding the loop to a different rhythm */
-  guard.update(dt, fps, record.active || photo.active);
+  const held = record.active || photo.active;
+  guard.update(dt, fps, held);
+  /* Resolution first: it is the only setting whose cost is linear and the only
+     one that can be spent a few per cent at a time, so it absorbs the load long
+     before the profile ladder has made up its mind. The GPU's own timer needs
+     the query running, which is otherwise only paid for when the panel is open
+     — it is cheap, and this is the one number worth having always. */
+  if (!held) {
+    gpu.forced = true;
+    res.update(dt, dt * 1000, gpu.supported ? gpu.ms : 0);
+  }
 
   /* bookkeeping for the single end-of-session beacon */
   if (!telemetry.data.ok) telemetry.set({ ok: true });
@@ -960,7 +984,7 @@ window.__mr = {
   /* The benchmark prices one knob at a time, and every knob it cares about is
      an argument to this. Exposing the applier rather than a dozen setters keeps
      the thing being measured identical to the thing that ships. */
-  applyTier, tiers: TIERS,
+  applyTier, tiers: TIERS, res,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },
