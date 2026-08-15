@@ -320,12 +320,7 @@ export function assets() {
     tex: { glow, dot, streak, band, wetness, windows, glyphs },
 
     /* surfaces */
-    asphalt: new THREE.MeshStandardMaterial({
-      color: 0x07080c,
-      roughness: 0.34,
-      metalness: 0.62,
-      roughnessMap: wetness,
-    }),
+    asphalt: wetAsphalt(wetness),
     shoulder: new THREE.MeshStandardMaterial({ color: 0x0a0a0d, roughness: 0.9, metalness: 0.1 }),
     ground: new THREE.MeshStandardMaterial({
       color: 0x05060a, roughness: 1.0, metalness: 0.0, emissive: 0x04060e, emissiveIntensity: 1,
@@ -402,6 +397,45 @@ export function assets() {
   };
 
   return cache;
+}
+
+
+/**
+ * Tarmac whose puddles arrive with the rain.
+ *
+ * The roughness map is a map of standing water — ninety soft pools drawn on an
+ * otherwise even surface — and it was being applied at full strength whether or
+ * not it had rained. On a dry road that is ninety dark stains on the tarmac
+ * with nothing to explain them, and once the tiling was corrected and the pools
+ * became pool-sized instead of a fine ripple, they were the first thing you saw.
+ *
+ * Three.js multiplies `roughness` by the map, so there is no material property
+ * that fades one without fading the other. One line of the standard shader,
+ * blended back towards the plain value, does it: dry tarmac is even, wet tarmac
+ * has water lying on it, and everything in between is in between.
+ */
+function wetAsphalt(map) {
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x07080c,
+    roughness: 0.34,
+    metalness: 0.62,
+    roughnessMap: map,
+  });
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uPuddles = { value: 0 };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', 'uniform float uPuddles;\nvoid main() {')
+      .replace('#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+         roughnessFactor = mix(roughness, roughnessFactor, uPuddles);`);
+    mat.userData.shader = shader;
+  };
+  /** 0 for dry tarmac, 1 for standing water. */
+  mat.setPuddles = (v) => {
+    const sh = mat.userData.shader;
+    if (sh) sh.uniforms.uPuddles.value = v;
+  };
+  return mat;
 }
 
 /** HDR-ish colour: values above 1.0 punch through the bloom threshold. */

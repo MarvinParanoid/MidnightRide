@@ -128,54 +128,117 @@ const WARMUP = 3;        // shaders are still compiling; ignore the first frames
  */
 const SCALE_MIN = 0.55;      // below this the picture is soft enough to notice
 const SCALE_MAX = 1.0;       // never more than the profile already allows
-const AIM_MS = 13.5;         // comfortably inside a 60 Hz frame
-const HIGH_MS = 16.0;        // over this, give ground
-const LOW_MS = 9.5;          // under this, there is room to take some back
+/* A sixty-hertz frame is 16.7 ms. Aim just inside it rather than well inside:
+   the first version aimed at 13.5, which a machine holding a steady 58 fps at
+   15.5 ms cannot reach at any resolution it has left — so it spent everything
+   it had down to the floor and sat there, trading half the pixels for headroom
+   nobody asked for. The point is to hold the frame rate, not to beat it. */
+const AIM_MS = 15.2;         // just inside a 60 Hz frame
+const HIGH_MS = 17.2;        // over this the frame is being missed; give ground
+const LOW_MS = 11.5;         // under this there is room to take some back
 const SETTLE = 0.8;          // seconds between changes: each one costs a reallocation
 const STEP_ENOUGH = 0.03;    // do not reallocate for a change nobody could see
 
 export class ResolutionGuard {
   constructor(apply) {
     this.apply = apply;
-    this.scale = 1;
-    this.applied = 1;
-    this.since = 0;
-    this.warm = 0;
+    this.reset();
   }
 
-  /** Called once a frame. `gpuMs` is null when the browser has no timer query. */
+  /**
+   * Called once a frame; decides once a window.
+   *
+   * The decision has to be rate-limited, not just the change. The first version
+   * adjusted its target every frame and only applied the result every eight
+   * hundred milliseconds — so between one measurement and the next it multiplied
+   * the target by 0.94 fifty times, arrived at the floor, and then did the same
+   * thing upwards. Traced against a load that actually responds to resolution,
+   * it swung 1.00 to 0.55 and back with a twenty-second period, never once
+   * stopping at the value in between that was the right answer. A controller
+   * must not act on a measurement it has already acted on.
+   *
+   * @param gpuMs  the GPU's own figure, or 0 where the browser has no timer
+   */
   update(dt, frameMs, gpuMs) {
     this.warm += dt;
     this.since += dt;
     if (this.warm < WARMUP) return;
 
-    /* The GPU's own figure when there is one. Otherwise wall-clock, with the
-       target relaxed, because a vsynced 60 Hz frame reads as 16.7 ms whether
-       the work took two milliseconds or sixteen and only a frame that misses
-       says anything at all. */
-    const ms = gpuMs && gpuMs > 0 ? gpuMs : frameMs;
-    const slack = gpuMs && gpuMs > 0 ? 1 : 1.25;
-
-    if (ms > HIGH_MS * slack) this.scale *= 0.94;
-    else if (ms < LOW_MS * slack) this.scale *= 1.02;
-    else this.scale += (AIM_MS - ms) * 0.0008;     // creep towards the target
-
-    this.scale = Math.max(SCALE_MIN, Math.min(SCALE_MAX, this.scale));
+    /* The card's own number where there is one. Wall-clock frame time on a
+       vsynced display is quantised to the refresh interval and cannot tell nine
+       milliseconds of work from fifteen, so it gets a wider target. */
+    const havGpu = gpuMs > 0;
+    const ms = havGpu ? gpuMs : frameMs;
+    const slack = havGpu ? 1 : 1.25;
+    this.recent = this.recent ? this.recent * 0.88 + ms * 0.12 : ms;
 
     if (this.since < SETTLE) return;
-    if (Math.abs(this.scale - this.applied) < STEP_ENOUGH) return;
     this.since = 0;
-    this.applied = this.scale;
-    this.apply(this.applied);
+    const now = this.recent;
+
+    /* Did the last cut buy anything? Pixels are only worth spending while
+       pixels are what the frame is made of. A machine held up by its processor,
+       or one sitting on the vertical sync, reports the same milliseconds
+       however few it is given — and a controller that only knows how to give
+       ground hands over all of them for nothing. */
+    if (this.cutFrom > 0) {
+      const bought = this.cutFrom - now;
+      if (bought < this.cutFrom * 0.03) { this.stuck = true; this.stuckAt = now; }
+      this.cutFrom = 0;
+    }
+    if (this.stuck && now > this.stuckAt * 1.25) this.stuck = false;  // something changed
+
+    let want = this.scale;
+    if (now > HIGH_MS * slack) want *= 0.90;
+    else if (now < LOW_MS * slack) want *= 1.06;
+    else want += (AIM_MS * slack - now) * 0.01;
+    want = Math.max(SCALE_MIN, Math.min(SCALE_MAX, want));
+
+    if (this.stuck && want < this.scale) return;      // no more ground to give
+    if (Math.abs(want - this.scale) < STEP_ENOUGH) return;
+
+    if (want < this.scale) this.cutFrom = now;
+    this.scale = want;
+    this.apply(this.scale);
   }
 
-  /** A profile change rebuilds the buffers anyway; start it from the top. */
-  reset() {
-    this.scale = 1;
-    this.applied = 1;
+  /**
+   * The operating point moved — a profile change, a resize — so the readings
+   * taken at the old one mean nothing.
+   *
+   * What must NOT happen here is the scale going back to one. It did, and it
+   * turned the two controllers into a machine for making things worse: the
+   * profile steps down to relieve a slow frame, that hands every pixel the
+   * resolution controller had saved straight back, the frame is slow again,
+   * and the profile steps down once more. Two steps later it is on the low
+   * profile at full resolution — which is heavier than the high profile at
+   * three-quarters, the thing it was trying to escape.
+   */
+  rebase() {
     this.since = 0;
     this.warm = 0;
+    this.recent = 0;
+    this.cutFrom = 0;
+    this.stuckAt = 0;
+    this.stuck = false;
   }
+
+  /** Fresh, for construction only. */
+  reset() {
+    this.scale = 1;
+    this.rebase();
+  }
+
+  /**
+   * True when there is no more resolution to give: either it is on the floor,
+   * or giving more was measured not to help. Until then the profile ladder
+   * should keep its hands in its pockets — resolution is the cheap, linear,
+   * reversible knob and the ladder is none of those things.
+   */
+  get spent() { return this.stuck || this.scale <= SCALE_MIN + 0.01; }
+
+  /** What is actually being rendered, for the panel. */
+  get applied() { return this.scale; }
 }
 
 export class QualityGuard {
@@ -190,9 +253,16 @@ export class QualityGuard {
     this.startName = TIERS[index].name;
   }
 
-  update(dt, fps, busy) {
+  /**
+   * @param holdDown  resolution still has ground to give, so do not step down
+   *                  yet. Stepping up stays allowed: a machine that recovers
+   *                  should climb back whatever the resolution is doing.
+   */
+  update(dt, fps, busy, holdDown = false) {
     this.warm += dt;
     if (this.warm < WARMUP || busy) return;
+
+    if (holdDown && fps < DOWN_FPS) { this.badFor = 0; this.goodFor = 0; return; }
 
     if (fps < DOWN_FPS) { this.badFor += dt; this.goodFor = 0; }
     else if (fps > UP_FPS) { this.goodFor += dt; this.badFor = 0; }

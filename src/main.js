@@ -395,7 +395,7 @@ function setSamples(n) {
     rt.dispose();
   }
 }
-const guard = new QualityGuard(quality.index, (tier) => { res.reset(); applyTier(tier); });
+const guard = new QualityGuard(quality.index, (tier) => { res.rebase(); applyTier(tier); });
 /* Resolution moves first and moves often; the profile ladder is what is left
    for the settings that cannot be scaled a few per cent at a time. */
 const res = new ResolutionGuard((scale) => {
@@ -605,6 +605,8 @@ function updateWorld(dt, now) {
   renderer.setClearColor(pal.fog, 1);
 
   /* the surface, so these follow the road and not the sky */
+  /* The pools only exist when there is water to make them. */
+  a.asphalt.setPuddles(clamp(wet * 1.3, 0, 1));
   a.asphalt.roughness = 0.5 - wet * 0.26;
   a.asphalt.metalness = 0.28 + wet * 0.3;
   a.asphalt.envMapIntensity = 0.7 + wet * 1.5;
@@ -683,6 +685,7 @@ let clockTick = 0;
 let odoTick = 15;
 let clockStr = formatClock();
 let fps = 0;
+let frames = 0;   // only used to sample the GPU timer every few frames
 let rideTime = 0;
 let autoTime = 0;
 
@@ -691,6 +694,7 @@ function frame() {
   let dt = record.active ? record.dt : Math.min(0.05, wall - last);
   last = wall;
   fps = fps ? fps * 0.94 + (1 / Math.max(dt, 1e-4)) * 0.06 : 1 / Math.max(dt, 1e-4);
+  frames++;
   renderer.info.reset();   // autoReset is off, so stats cover the whole frame
   if (!running) dt = Math.min(dt, 1 / 60);
 
@@ -882,14 +886,20 @@ function frame() {
   /* let the frame rate decide the quality, but not while a recording or a
      photo pose is holding the loop to a different rhythm */
   const held = record.active || photo.active;
-  guard.update(dt, fps, held);
+  /* The ladder waits while resolution still has ground to give. Both of them
+     watch the same slow frame, and if both act on it the ladder's step-down
+     lands on a frame the controller has already fixed. */
+  guard.update(dt, fps, held, !res.spent);
   /* Resolution first: it is the only setting whose cost is linear and the only
      one that can be spent a few per cent at a time, so it absorbs the load long
      before the profile ladder has made up its mind. The GPU's own timer needs
      the query running, which is otherwise only paid for when the panel is open
      — it is cheap, and this is the one number worth having always. */
   if (!held) {
-    gpu.forced = true;
+    /* Every fourth frame is plenty: the controller reads a smoothed figure once
+       every eight hundred milliseconds, and a timer query is two GL calls and a
+       query object per frame that nobody should pay for sixty times a second. */
+    gpu.forced = (frames & 3) === 0;
     res.update(dt, dt * 1000, gpu.supported ? gpu.ms : 0);
   }
 
