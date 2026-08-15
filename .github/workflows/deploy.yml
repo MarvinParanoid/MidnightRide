@@ -25,7 +25,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The one beacon a session sends, if anywhere to send it. Not a secret:
+      # it is a public endpoint that accepts writes by design, and the address
+      # ends up in the shipped bundle where anyone can read it — hiding it in
+      # the repository settings would protect nothing and would mean a build
+      # that quietly stops reporting the day someone forgets to set it.
       - run: npm run build
+        env:
+          VITE_TELEMETRY_URL: https://midnight-ride-telemetry.marvinparanoid.workers.dev/c
       # Pages must already be enabled with "GitHub Actions" as the source:
       # Settings -> Pages -> Build and deployment -> Source. The workflow token
       # is not allowed to create the site itself.
