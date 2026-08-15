@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { lerp, clamp, smoothstep } from './geo.js';
+import { WORLD_SEED, pick } from './seed.js';
 
 /**
  * The ride is always at night — but *which* night depends on the clock on your
@@ -79,20 +80,25 @@ const CONDITIONS = [
  * reshuffle every reload — and shaped so it rains more often than not,
  * because wet asphalt is the whole point.
  */
-export function weatherForToday(date = new Date()) {
-  const day = Math.floor(date.getTime() / 86400000);
-  let x = Math.sin(day * 12.9898) * 43758.5453;
-  x = x - Math.floor(x);
+export function weatherForToday(seed = WORLD_SEED) {
+  /* From the world seed rather than from the calendar, which by default is the
+     calendar anyway — the seed defaults to today. What it buys is that
+     `?seed=74291` is a whole night and not half of one: the same road with
+     different weather over it would be a different ride wearing the same name.
+     The road itself is deliberately left out of the seed. Its permanence is the
+     reason "kilometre 4,182" means anything to anyone, and a road that
+     reshuffled every day would take that with it. The road is the road; the
+     night is tonight. */
+  const x = pick(seed, 'condition');
   const weights = [0.24, 0.18, 0.08, 0.14, 0.16, 0.12, 0.08];
-  let acc = 0, pick = 0;
+  let acc = 0, which = 0;
   for (let i = 0; i < weights.length; i++) {
     acc += weights[i];
-    if (x < acc) { pick = i; break; }
-    pick = i;
+    if (x < acc) { which = i; break; }
+    which = i;
   }
-  let y = Math.sin(day * 78.233) * 24634.6345;
-  y = y - Math.floor(y);
-  return { ...CONDITIONS[pick], temp: Math.round(2 + y * 16), phase: x * 6.283 + y * 2.7 };
+  const y = pick(seed, 'temperature');
+  return { ...CONDITIONS[which], temp: Math.round(2 + y * 16), phase: x * 6.283 + y * 2.7 };
 }
 
 /**

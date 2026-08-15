@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { assets, neon } from './assets.js';
 import { clamp, damp, smoothstep, mulberry32, MeshBuilder } from './geo.js';
 import { BIOME, VIEW_DIST, ROAD_HALF, SHOULDER } from './constants.js';
+import { WORLD_SEED, keyed } from './seed.js';
 import { riderFigure, beam } from './bike.js';
 
 /**
@@ -12,6 +13,12 @@ import { riderFigure, beam } from './bike.js';
  * intervals below are long on purpose — if you find yourself seeing one of
  * these twice in a short ride, they are too frequent, not too sparse.
  */
+
+
+/* The intervals below were written in seconds and are now written in metres.
+   This is what one of those seconds was worth: a shade under open-road speed,
+   so a train that used to come along every four or five minutes still does. */
+const PACE = 32;
 
 const CARRIAGES = 12;
 const CARRIAGE_GAP = 25;
@@ -87,20 +94,64 @@ export class Events {
     this.thunder = [];
     this.sounds = null;
 
-    const r = this.rnd;
     this.plane = {
-      group: null, t: -1, next: 200 + r() * 420,
+      group: null, t: -1,
       from: new THREE.Vector3(), to: new THREE.Vector3(),
     };
-    this.train = { cars: null, active: false, head: 0, side: 1, speed: 40, next: 260 + r() * 420, life: 0 };
-    this.rider = { obj: null, lean: null, active: false, s: 0, lat: 0, speed: 42, next: 180 + r() * 360, life: 0, phase: 0 };
-    this.storm = { active: false, until: 0, strikeAt: 0, next: 150 + r() * 300, reflash: -1 };
+    this.train = { cars: null, active: false, head: 0, side: 1, speed: 40, life: 0 };
+    this.rider = { obj: null, lean: null, active: false, s: 0, lat: 0, speed: 42, life: 0, phase: 0 };
+    this.storm = { active: false, until: 0, strikeAt: 0, reflash: -1 };
     this.overlook = { obj: null };
-    this.works = { obj: null, active: false, s: 0, side: 1, len: 0,
-                   next: 200 + r() * 380, chase: 0 };
-    this.broken = { obj: null, active: false, s: 0, next: 150 + r() * 320 };
+    this.works = { obj: null, active: false, s: 0, side: 1, len: 0, chase: 0 };
+    this.broken = { obj: null, active: false, s: 0 };
+
+    /* The first of each, placed from the start line. */
+    this.arm(this.plane, 'plane', 200 * PACE, 420 * PACE);
+    this.arm(this.train, 'train', 260 * PACE, 420 * PACE);
+    this.arm(this.rider, 'rider', 180 * PACE, 360 * PACE);
+    this.arm(this.storm, 'storm', 150 * PACE, 300 * PACE);
+    this.arm(this.works, 'works', 200 * PACE, 380 * PACE);
+    this.arm(this.broken, 'broken', 150 * PACE, 320 * PACE);
     /* how many of the rare things this session actually showed anyone */
     this.seen = { train: 0, rider: 0, plane: 0, planeLow: 0, lightning: 0, works: 0, broken: 0 };
+  }
+
+  /**
+   * Put the next one of something on the road ahead.
+   *
+   * On the road, not on the clock. Every one of these used to be a countdown
+   * in seconds, so the train arrived four minutes in — which is a different
+   * kilometre on a fast machine than on a slow one, and a different kilometre
+   * again if you were dawdling. Placed at a distance instead, the train is at
+   * the seventeenth kilometre for everyone who rides this seed.
+   *
+   * Each occurrence gets its own generator, keyed by which occurrence it is
+   * rather than drawn from a stream shared with the other five. Sharing one
+   * stream meant that skipping an event — no rider inside a tunnel — shifted
+   * every draw after it, and the seed stopped meaning the same ride.
+   */
+  arm(x, kind, minM, spanM, s = -Infinity) {
+    /* Each slot is measured from the last slot, never from where the rider
+       happens to be. Measuring from the rider looked equivalent and is not:
+       some of these last a while in seconds — a storm blows for a minute, a
+       rider runs with you for half of one — so whoever is pressing on finishes
+       further down the road and every slot after that shifts. Two people on the
+       same seed then share the first few events and nothing after them, which
+       is the opposite of the promise.
+       As a cumulative sum of gaps the timetable belongs to the road: slot four
+       is at its kilometre whether you took an hour to get there or ten minutes.
+       Whether you are present for it is your business — ride into a tunnel and
+       the slot passes without a rider in it — but where it is, is not. */
+    do {
+      x.n = (x.n || 0) + 1;
+      x.r = mulberry32(keyed(WORLD_SEED, kind, x.n));
+      x.at = (x.at || 0) + minM + x.r() * spanM;
+      /* The timetable, kept so it can be asserted and, one day, printed: a
+         seed's night written out as a list of kilometres. Bounded because a
+         long haul is long. */
+      (x.slots || (x.slots = [])).push(Math.round(x.at));
+      if (x.slots.length > 256) x.slots.shift();
+    } while (x.at < s);          // catch up past anything already behind us
   }
 
   /* ── lazy construction: nothing exists until it first happens ── */
@@ -318,14 +369,13 @@ export class Events {
   updateWorks(dt, st) {
     const w = this.works;
     if (!w.active) {
-      w.next -= dt;
       const ok = st.biome === 'HIGHWAY' || st.biome === 'CITY';
-      if (w.next > 0 || !ok || st.v < 8) return;
+      if (st.s < w.at || !ok || st.v < 8) return;
       if (!w.obj) this.buildWorks();
       w.active = true;
       w.side = 1;                       // always the outer lane on your side
-      w.s = st.s + 260 + this.rnd() * 180;
-      w.len = 120 + this.rnd() * 90;
+      w.s = st.s + 260 + w.r() * 180;
+      w.len = 120 + w.r() * 90;
 
       const origin = this.road.point(w.s, 0, 0, new THREE.Vector3());
       w.obj.position.copy(origin);
@@ -363,7 +413,7 @@ export class Events {
     if (st.s > w.s + w.len + 140) {
       w.active = false;
       w.obj.visible = false;
-      w.next = 260 + this.rnd() * 420;
+      this.arm(w, 'works', 260 * PACE, 420 * PACE, st.s);
     }
   }
 
@@ -429,12 +479,11 @@ export class Events {
   updateBroken(dt, st) {
     const bd = this.broken;
     if (!bd.active) {
-      bd.next -= dt;
-      if (bd.next > 0 || st.v < 8 || st.biome === 'TUNNEL' || st.biome === 'BRIDGE') return;
+      if (st.s < bd.at || st.v < 8 || st.biome === 'TUNNEL' || st.biome === 'BRIDGE') return;
       if (!bd.obj) this.buildBroken();
       bd.active = true;
-      bd.s = st.s + 220 + this.rnd() * 220;
-      const side = this.rnd() < 0.75 ? 1 : -1;
+      bd.s = st.s + 220 + bd.r() * 220;
+      const side = bd.r() < 0.75 ? 1 : -1;
       this.road.point(bd.s, side * (ROAD_HALF + SHOULDER - 0.7), 0, this.tmp);
       bd.obj.position.copy(this.tmp);
       bd.obj.rotation.y = -this.road.poseAt(bd.s).h + (side > 0 ? 0 : Math.PI);
@@ -450,7 +499,7 @@ export class Events {
     if (st.s > bd.s + 120) {
       bd.active = false;
       bd.obj.visible = false;
-      bd.next = 220 + this.rnd() * 400;
+      this.arm(bd, 'broken', 220 * PACE, 400 * PACE, st.s);
     }
   }
 
@@ -459,15 +508,14 @@ export class Events {
   updatePlane(dt, st) {
     const p = this.plane;
     if (p.t < 0) {
-      p.next -= dt;
-      if (p.next > 0) return;
+      if (st.s < p.at) return;
       if (!p.group) this.buildPlane();
       const pose = this.road.poseAt(st.s + 600);
       /* Once in a while it isn't a light crossing the sky at cruise — it is
          something enormous on approach, low enough to pass right over you. */
-      p.low = this.rnd() < 0.3;
+      p.low = p.r() < 0.3;
       if (p.low) {
-        const h = this.rnd() < 0.5 ? 1 : -1;
+        const h = p.r() < 0.5 ? 1 : -1;
         p.from.set(pose.x + h * 700, pose.y + 210, pose.z - 900);
         p.to.set(pose.x - h * 260, pose.y + 46, pose.z + 700);
       } else {
@@ -485,7 +533,7 @@ export class Events {
     p.t += dt / (p.low ? 17 : 46);
     if (p.t > 1) {
       p.t = -1;
-      p.next = 240 + this.rnd() * 480;
+      this.arm(p, 'plane', 240 * PACE, 480 * PACE, st.s);
       p.strobe.material.opacity = 0;
       p.nav.material.opacity = 0;
       if (this.sounds) this.sounds.sky.set(0, 0);
@@ -507,24 +555,23 @@ export class Events {
     const tr = this.train;
 
     if (!tr.active) {
-      tr.next -= dt;
       const openCountry = st.biome === BIOME.HIGHWAY || st.biome === BIOME.FOREST;
-      if (tr.next > 0 || !openCountry || st.remote < 0.2 || st.v < 12) return;
+      if (st.s < tr.at || !openCountry || st.remote < 0.2 || st.v < 12) return;
       if (!tr.cars) this.buildTrain();
       tr.active = true;
       this.seen.train++;
       tr.life = 0;
       tr.company = 0;
-      tr.side = this.rnd() < 0.5 ? -1 : 1;
+      tr.side = tr.r() < 0.5 ? -1 : 1;
       /* Spawn distance and speed have to agree, or it just recedes for a
          minute and you never actually see it: either it comes up behind and
          overtakes you, or it is ahead and you slowly reel it in. */
-      if (this.rnd() < 0.5) {
-        tr.head = st.s - 220 - this.rnd() * 120;
-        tr.speed = clamp(st.v * (1.1 + this.rnd() * 0.16), 26, 62);
+      if (tr.r() < 0.5) {
+        tr.head = st.s - 220 - tr.r() * 120;
+        tr.speed = clamp(st.v * (1.1 + tr.r() * 0.16), 26, 62);
       } else {
-        tr.head = st.s + 260 + this.rnd() * 200;
-        tr.speed = clamp(st.v * (0.76 + this.rnd() * 0.12), 22, 58);
+        tr.head = st.s + 260 + tr.r() * 200;
+        tr.speed = clamp(st.v * (0.76 + tr.r() * 0.12), 22, 58);
       }
       for (const c of tr.cars) c.visible = true;
       return;
@@ -536,10 +583,10 @@ export class Events {
     /* once a carriage is level with you it settles into your pace, and for a
        while you are just two things moving through the dark together */
     if (tr.company === 0 && tr.life > 3 && Math.abs(rel - CARRIAGE_GAP * 3) < 90) {
-      tr.company = 22 + this.rnd() * 40;
+      tr.company = (22 + tr.r() * 40) * PACE;
     }
     if (tr.company > 0) {
-      tr.company -= dt;
+      tr.company -= Math.abs(st.v) * dt;
       tr.speed = damp(tr.speed, st.v, 0.7, dt);
     }
 
@@ -547,7 +594,7 @@ export class Events {
     rel = tr.head - st.s;
     if (rel < -80 || rel > VIEW_DIST + 240 || tr.life > 220) {
       tr.active = false;
-      tr.next = 300 + this.rnd() * 540;
+      this.arm(tr, 'train', 300 * PACE, 540 * PACE, st.s);
       for (const c of tr.cars) c.visible = false;
       if (this.sounds) this.sounds.train.set(0, 0);
       return;
@@ -573,27 +620,26 @@ export class Events {
     const rd = this.rider;
 
     if (!rd.active) {
-      rd.next -= dt;
-      if (rd.next > 0 || st.v < 14 || st.biome === BIOME.TUNNEL) return;
+      if (st.s < rd.at || st.v < 14 || st.biome === BIOME.TUNNEL) return;
       if (!rd.obj) this.buildRider();
       rd.active = true;
       this.seen.rider++;
       rd.life = 0;
       rd.company = 0;
-      rd.phase = this.rnd() * 6.28;
-      rd.wantRel = -8 + this.rnd() * 24;      // where they end up sitting relative to you
+      rd.phase = rd.r() * 6.28;
+      rd.wantRel = -8 + rd.r() * 24;      // where they end up sitting relative to you
       rd.flash = 0;
       rd.greeted = false;
       rd.latBase = 3.3;
       // same deal as the train: they either catch you, or you catch them
-      if (this.rnd() < 0.5) {
-        rd.s = st.s - 130 - this.rnd() * 90;
-        rd.speed = clamp(st.v * (1.12 + this.rnd() * 0.18), 24, 64);
+      if (rd.r() < 0.5) {
+        rd.s = st.s - 130 - rd.r() * 90;
+        rd.speed = clamp(st.v * (1.12 + rd.r() * 0.18), 24, 64);
       } else {
-        rd.s = st.s + 110 + this.rnd() * 150;
-        rd.speed = clamp(st.v * (0.78 + this.rnd() * 0.12), 20, 60);
+        rd.s = st.s + 110 + rd.r() * 150;
+        rd.speed = clamp(st.v * (0.78 + rd.r() * 0.12), 20, 60);
       }
-      rd.lat = 1.8 + this.rnd() * 3;
+      rd.lat = 1.8 + rd.r() * 3;
       rd.obj.visible = true;
       return;
     }
@@ -605,7 +651,7 @@ export class Events {
        they do, they settle into the next lane rather than a dot on the
        horizon. Two headlights on an empty road is the whole point of them. */
     if (rd.company === 0 && rd.life > 3 && Math.abs(rel) < 90) {
-      rd.company = 25 + this.rnd() * 50;
+      rd.company = (25 + rd.r() * 50) * PACE;
       /* Two riders meeting on an empty road at night flash their lamps at each
          other. It costs nothing and it is the only moment in the game where
          anything acknowledges you. */
@@ -623,7 +669,7 @@ export class Events {
       rd.headGlow.scale.setScalar(on ? 3.2 : 1.6);
     }
     if (rd.company > 0) {
-      rd.company -= dt;
+      rd.company -= Math.abs(st.v) * dt;
       const closing = clamp((rd.wantRel - rel) * 0.4, -9, 9);
       rd.speed = damp(rd.speed, st.v + closing, 1.8, dt);
     }
@@ -632,7 +678,7 @@ export class Events {
     rel = rd.s - st.s;
     if (rel < -220 || rel > 700 || rd.life > 260) {
       rd.active = false;
-      rd.next = 220 + this.rnd() * 420;
+      this.arm(rd, 'rider', 220 * PACE, 420 * PACE, st.s);
       rd.obj.visible = false;
       if (this.sounds) this.sounds.rider.set(0, 90);
       return;
@@ -732,22 +778,24 @@ export class Events {
       return;
     }
     if (!sm.active) {
-      sm.next -= dt;
-      if (sm.next <= 0) {
+      if (st.s >= sm.at) {
         sm.active = true;
-        sm.until = st.now + 45 + this.rnd() * 70;
-        sm.strikeAt = st.now + this.rnd() * 8;
+        /* A cell covers a stretch of road. In seconds it covered a stretch
+           of your evening instead, so it ended at a different kilometre for
+           every rider and pushed the whole timetable after it out of step. */
+        sm.until = st.s + (45 + sm.r() * 70) * PACE;
+        sm.strikeAt = st.now + sm.r() * 8;
       }
       return;
     }
-    if (st.now > sm.until) {
+    if (st.s > sm.until) {
       sm.active = false;
-      sm.next = 180 + this.rnd() * 360;
+      this.arm(sm, 'storm', 180 * PACE, 360 * PACE, st.s);
       return;
     }
     if (st.now >= sm.strikeAt) {
       this.strike(st.now);
-      sm.strikeAt = st.now + 7 + this.rnd() * 16;
+      sm.strikeAt = st.now + 7 + sm.r() * 16;
     }
     if (sm.reflash > 0 && st.now >= sm.reflash) {
       sm.reflash = -1;

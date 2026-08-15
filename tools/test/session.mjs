@@ -62,7 +62,7 @@ export async function launch({ gpu = false } = {}) {
  * Open the game with both sources of chance pinned.
  * Returns the page plus a live array of anything the page logged as an error.
  */
-export async function session(browser, { width = 1152, height = 648, seed = 20260813, tier = null } = {}) {
+export async function session(browser, { width = 1152, height = 648, seed = 20260813, tier = null, query = '' } = {}) {
   const page = await browser.newPage();
   await page.setViewport({ width, height, deviceScaleFactor: 1 });
 
@@ -120,7 +120,13 @@ export async function session(browser, { width = 1152, height = 648, seed = 2026
      chain — multisampling included — is built the way that profile builds it.
      Pinning it afterwards only changes the settings that can be changed later,
      which is why a low-profile fault was not reproducible from this harness. */
-  await page.goto(tier ? `${URL}${URL.includes('?') ? '&' : '?'}q=${tier}` : URL,
+  /* A wet seed unless a test asks for another one.
+     The world seed decides the weather, and left to the frozen calendar it came
+     out Overcast — which is a perfectly good night and a poor thing to record
+     six golden frames of, because the wet road is where the reflections, the
+     spray and half the shader work live. Pin a night that exercises them. */
+  const params = [tier ? `q=${tier}` : '', query || 'seed=20260815'].filter(Boolean).join('&');
+  await page.goto(params ? `${URL}${URL.includes('?') ? '&' : '?'}${params}` : URL,
     { waitUntil: 'networkidle0' });
   await page.waitForFunction(() => window.__mr && window.__mr.record.active, { timeout: 20000 });
   await page.mouse.click(width / 2, height / 2);   // past the title screen
