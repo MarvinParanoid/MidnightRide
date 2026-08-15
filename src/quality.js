@@ -126,16 +126,26 @@ const WARMUP = 3;        // shaders are still compiling; ignore the first frames
  * chain, so a controller that nudged the size every frame would spend more than
  * it saved.
  */
-const SCALE_MIN = 0.55;      // below this the picture is soft enough to notice
+/* Three quarters, not a half.
+   The floor was 0.55, which on a 1920-wide window is a buffer 1056 across
+   stretched back over the screen — and the first thing reported from the saddle
+   was that the picture had gone soft, on a machine that was holding 58 frames a
+   second at the time. That is the controller paying for headroom nobody asked
+   for. It exists to stop frames being missed, not to keep a margin, so it may
+   spend a quarter of the linear resolution and no more; below that the answer
+   is a cheaper profile, not a blurrier one. */
+const SCALE_MIN = 0.75;
 const SCALE_MAX = 1.0;       // never more than the profile already allows
-/* A sixty-hertz frame is 16.7 ms. Aim just inside it rather than well inside:
-   the first version aimed at 13.5, which a machine holding a steady 58 fps at
-   15.5 ms cannot reach at any resolution it has left — so it spent everything
-   it had down to the floor and sat there, trading half the pixels for headroom
-   nobody asked for. The point is to hold the frame rate, not to beat it. */
-const AIM_MS = 15.2;         // just inside a 60 Hz frame
-const HIGH_MS = 17.2;        // over this the frame is being missed; give ground
-const LOW_MS = 11.5;         // under this there is room to take some back
+/* A dead band, and nothing inside it.
+   A sixty-hertz frame is 16.7 ms. The first two versions aimed at a number
+   inside that and crept towards it every window, which means a machine sitting
+   comfortably at 15.5 ms was still being asked to give up pixels — for ever,
+   since giving them up moved the target no closer. Nothing between the two
+   thresholds now: over the top one the frame is genuinely being missed and
+   ground is given; under the bottom one there is room and it is taken back;
+   between them the controller has no opinion and leaves the picture alone. */
+const HIGH_MS = 17.6;        // past the frame budget: it is being missed
+const LOW_MS = 13.0;         // clear room to take some back
 const SETTLE = 0.8;          // seconds between changes: each one costs a reallocation
 const STEP_ENOUGH = 0.03;    // do not reallocate for a change nobody could see
 
@@ -189,9 +199,9 @@ export class ResolutionGuard {
     if (this.stuck && now > this.stuckAt * 1.25) this.stuck = false;  // something changed
 
     let want = this.scale;
-    if (now > HIGH_MS * slack) want *= 0.90;
-    else if (now < LOW_MS * slack) want *= 1.06;
-    else want += (AIM_MS * slack - now) * 0.01;
+    if (now > HIGH_MS * slack) want *= 0.92;
+    else if (now < LOW_MS * slack) want *= 1.05;
+    else return;                       // inside the band: leave it alone
     want = Math.max(SCALE_MIN, Math.min(SCALE_MAX, want));
 
     if (this.stuck && want < this.scale) return;      // no more ground to give
