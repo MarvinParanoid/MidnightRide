@@ -15,7 +15,7 @@ import { detectQuality, QualityGuard, TIERS } from './quality.js';
 import { PhotoMode } from './photo.js';
 import { StreamMode, StreamPacer } from './stream.js';
 import { Hud, formatClock } from './hud.js';
-import { palette, nightHourFromLocal, placeName, weatherForToday } from './timeofday.js';
+import { palette, nightHourFromLocal, placeName, weatherForToday, rainAt } from './timeofday.js';
 import { AudioCore } from './audio/core.js';
 import { EngineSound } from './audio/engine.js';
 import { Music } from './audio/music.js';
@@ -524,6 +524,8 @@ function updateCamera(dt) {
 }
 
 /* ── atmosphere ────────────────────────────────────────────── */
+/* null until the first frame decides, so the ride does not open with a toast */
+let wasWet = null;
 let lastBiome = null;
 
 function updateWorld(dt, now) {
@@ -548,8 +550,20 @@ function updateWorld(dt, now) {
   pal.cityGlow *= clamp(0.3 + 0.7 * Math.max(1 - state.remote, approach), 0.3, 1.0);
   pal.stars = Math.min(1, pal.stars * (1 + state.remote * 0.5));
 
-  const rainAmount = state.rainOverride ?? weather.rain;
+  /* Tonight's condition says what kind of night it is; where you are on the
+     road says whether it is raining right now. The override still wins — the
+     weather key is for looking at something on purpose, and a shower drifting
+     in halfway through would make it useless. */
+  const rainAmount = state.rainOverride ?? rainAt(state.s, weather);
   state.rain = rainAmount;
+  /* Say so when it turns, and only when it turns. Rain arriving is the biggest
+     thing that happens to the picture without the rider doing anything, and
+     with no word for it the first thought is that something has broken. */
+  const wetNow = rainAmount > 0.06;
+  if (state.rainOverride === null && wetNow !== wasWet) {
+    if (wasWet !== null) hud.toast(wetNow ? 'RAIN' : 'RAIN EASING');
+    wasWet = wetNow;
+  }
   scene.fog.color.copy(pal.fog);
   scene.fog.density = pal.density * weather.fogMul * (1 - state.enclosure * 0.45)
     * (1 + rainAmount * 0.18) * (1 - state.remote * 0.22);

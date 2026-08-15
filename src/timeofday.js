@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { lerp, clamp } from './geo.js';
+import { lerp, clamp, smoothstep } from './geo.js';
 
 /**
  * The ride is always at night — but *which* night depends on the clock on your
@@ -92,5 +92,52 @@ export function weatherForToday(date = new Date()) {
   }
   let y = Math.sin(day * 78.233) * 24634.6345;
   y = y - Math.floor(y);
-  return { ...CONDITIONS[pick], temp: Math.round(2 + y * 16) };
+  return { ...CONDITIONS[pick], temp: Math.round(2 + y * 16), phase: x * 6.283 + y * 2.7 };
+}
+
+/**
+ * Weather that arrives and leaves, instead of weather that was decided once.
+ *
+ * The condition above is still tonight's character — a Heavy Rain night is wet
+ * about seven tenths of the way and a Clear one catches one shower in twenty
+ * five kilometres, and it pours on the first where it spits on the last — but it is
+ * now a description of the whole ride rather than a constant applied to every
+ * metre of it. Showers pass; the road dries between them and the reflections go
+ * with it, which is the only way the wet road reads as weather rather than as a
+ * setting.
+ *
+ * Driven by distance, not by the clock. Two reasons. The road is what you are
+ * moving through, so a front you ride into belongs to a place; and every test
+ * in this project pins the clock and teleports to a fixed distance, so a
+ * function of `s` is reproducible where a function of elapsed time is at the
+ * mercy of how many frames a machine happened to render.
+ */
+export function rainAt(s, w) {
+  /* Three waves that do not share a period, so the pattern does not repeat
+     inside a ride. The longest is about six kilometres — three or four minutes
+     at open-road speed, which is how long a shower takes to pass over you. */
+  const x = s / 6000 + w.phase;
+  const drift = 0.5 + 0.5 * (
+    Math.sin(x * 6.283) * 0.55 +
+    Math.sin(x * 2.31 + 1.7) * 0.3 +
+    Math.sin(x * 0.79 + 4.1) * 0.15);
+
+  /* How much of tonight is wet, and how hard it comes down when it is. A clear
+     night still gets the occasional passing drizzle — that is the variety the
+     whole thing is for — it just does not get a downpour.
+     The ceiling matters as much as the floor. Scaling this straight up to the
+     condition's own figure measured as 95% of a Rain night and 100% of a Heavy
+     Rain one spent under water: on two thirds of nights the weather would never
+     have turned at all, which is the thing being fixed. Even the wettest night
+     gets its breaks now — a downpour that lets up for a mile and comes back is
+     more weather than a downpour that never stops.
+     The coefficient is calibrated against the measured result rather than set
+     to the fraction wanted: three summed sines pile up around their midpoint,
+     so a threshold placed at 0.70 does not give a road that is wet seven tenths
+     of the time, it gives one that is wet nine tenths of it. */
+  const wetFraction = 0.05 + w.rain * 0.48;
+  /* A wide ramp, so a front takes a while to arrive and the shower swells
+     rather than switching on at full strength. */
+  const shower = smoothstep(1 - wetFraction - 0.16, 1 - wetFraction + 0.16, drift);
+  return clamp(shower * Math.max(w.rain, 0.32), 0, 1);
 }
