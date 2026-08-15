@@ -996,7 +996,7 @@ window.__mr = {
   /* The benchmark prices one knob at a time, and every knob it cares about is
      an argument to this. Exposing the applier rather than a dozen setters keeps
      the thing being measured identical to the thing that ships. */
-  applyTier, tiers: TIERS, res, weather, events,
+  applyTier, tiers: TIERS, res, weather, events, dev,
   get fps() { return fps; },
   get audio() { return audio; },
   get engine() { return engine; },

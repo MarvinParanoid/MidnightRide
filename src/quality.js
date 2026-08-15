@@ -136,7 +136,7 @@ const WARMUP = 3;        // shaders are still compiling; ignore the first frames
  * chain, so a controller that nudged the size every frame would spend more than
  * it saved.
  */
-/* Three quarters, not a half.
+/* Eighty-five per cent, and only in trouble.
    The floor was 0.55, which on a 1920-wide window is a buffer 1056 across
    stretched back over the screen — and the first thing reported from the saddle
    was that the picture had gone soft, on a machine that was holding 58 frames a
@@ -154,8 +154,15 @@ const SCALE_MAX = 1.0;       // never more than the profile already allows
    thresholds now: over the top one the frame is genuinely being missed and
    ground is given; under the bottom one there is room and it is taken back;
    between them the controller has no opinion and leaves the picture alone. */
-const HIGH_MS = 17.6;        // past the frame budget: it is being missed
-const LOW_MS = 13.0;         // clear room to take some back
+/* And it acts later. Seventeen and a half milliseconds is a frame missed at
+   sixty hertz, which sounds like the right place to intervene and is not: this
+   is a game people ride at night, not a shooter, and fifty frames a second is
+   an entirely good time that does not need buying. The pair below sits between
+   "fine" and the forty-five frames at which the profile ladder takes over, so
+   resolution makes the small correction first and the ladder is still the thing
+   that handles a machine which really cannot cope. */
+const HIGH_MS = 20.0;        // about fifty frames a second
+const LOW_MS = 15.0;         // clear room to take some back
 const SETTLE = 0.8;          // seconds between changes: each one costs a reallocation
 const STEP_ENOUGH = 0.03;    // do not reallocate for a change nobody could see
 
