@@ -213,7 +213,18 @@ function wetnessTexture(seed = 3) {
     img.data[i + 2] += n;
   }
   x.putImageData(img, 0, 0);
-  return texture(c, { repeat: [3, 40] });
+  /* Three tiles across the carriageway and four along the same distance.
+     It was [3, 40], and that is where the washboard on the road came from: the
+     ribbon's v runs one unit per sixteen metres, so forty repeats laid the map
+     down every forty-two centimetres along the road while still spanning four
+     metres across it. A tile ten times longer than it is wide, seen at the
+     angle a road is always seen at, is a picket fence — and no amount of
+     anisotropic filtering helps, because the fence is in the content and not in
+     the sampling. Measured on a frame at the start line: the ripple across the
+     tarmac reads 1.19 at [3, 40] and 0.10 with the map switched off entirely.
+     Square tiles instead, about four metres each way, which is what a puddle
+     is. */
+  return texture(c, { repeat: [3, 4] });
 }
 
 /* ────────────────────────────────────────────────────────────
