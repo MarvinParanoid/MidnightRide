@@ -54,6 +54,7 @@ export class Hud {
       <div class="tag">No destination. No finish line.<br />Just you, the road, and the night.</div>
       <div class="sub" data-startsub>—</div>
       <div class="back" data-startback></div>
+      <div class="seed" data-startseed></div>
       <!-- No key list on purpose. The hints sit in the corner while you ride,
            and a first screen is not the place for a manual. Touch devices get
            one line here instead, since they have no corner hints. -->
@@ -107,6 +108,40 @@ export class Hud {
 
   setIntro(text) {
     this.start.querySelector('[data-startsub]').textContent = text;
+  }
+
+  /**
+   * Which night this is, and how to hand it to somebody.
+   *
+   * The seed machinery was built and then had nowhere to be seen from, which
+   * made it a feature only someone reading the source could use. It belongs on
+   * the title screen and nowhere else: it is the one moment the game is willing
+   * to be about anything other than the road.
+   *
+   * Clicking copies the link and says so. It has to stop the click going any
+   * further, because the whole title screen is a button that starts the ride —
+   * copying a link and being thrown onto the road for it would be a poor
+   * reward.
+   */
+  setSeed(seed, shared, link) {
+    const el = this.start && this.start.querySelector('[data-startseed]');
+    if (!el) return;
+    const label = shared ? 'riding' : 'tonight';
+    el.innerHTML = `${label} · #${seed} · <button type="button" data-copy>copy link</button>`;
+    const button = el.querySelector('[data-copy]');
+    button.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      try {
+        await navigator.clipboard.writeText(link);
+        button.textContent = 'link copied';
+      } catch {
+        /* Clipboard permission, or an insecure origin. Show it instead — it is
+           short enough to read off the screen, which is more use than a failure
+           nobody can act on. */
+        button.textContent = link.replace(/^https?:\/\//, '');
+      }
+    });
   }
 
   /** "Welcome back, rider — 184 km travelled." The only progression here. */

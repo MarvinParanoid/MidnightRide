@@ -129,7 +129,12 @@ export async function session(browser, { width = 1152, height = 648, seed = 2026
   await page.goto(params ? `${URL}${URL.includes('?') ? '&' : '?'}${params}` : URL,
     { waitUntil: 'networkidle0' });
   await page.waitForFunction(() => window.__mr && window.__mr.record.active, { timeout: 20000 });
-  await page.mouse.click(width / 2, height / 2);   // past the title screen
+  /* A key, not a click in the middle of the screen. The title screen is one
+     big button, so clicking the centre of it worked right up until the centre
+     of it acquired a "copy link" that swallows the click — at which point the
+     whole suite would have failed at once with nothing to say why. A keypress
+     cannot land on the wrong thing. */
+  await page.keyboard.press('Space');              // past the title screen
   /* Quality is chosen from the machine, and the machine is not the same one
      twice: `detectQuality` calls anything with two cores or fewer weak, and a
      standard GitHub runner has exactly two. CI was therefore rendering in the

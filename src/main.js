@@ -16,6 +16,7 @@ import { PhotoMode } from './photo.js';
 import { StreamMode, StreamPacer } from './stream.js';
 import { Hud, formatClock } from './hud.js';
 import { palette, nightHourFromLocal, placeName, weatherForToday, rainAt } from './timeofday.js';
+import { WORLD_SEED, SEED_SHARED, rideLink } from './seed.js';
 import { AudioCore } from './audio/core.js';
 import { EngineSound } from './audio/engine.js';
 import { Music } from './audio/music.js';
@@ -97,6 +98,7 @@ const CAM_MODES = ['CHASE', 'CLOSE', 'CINEMATIC', 'FIRST PERSON'];
 const weather = weatherForToday();
 const place = placeName();
 hud.setIntro(`${place} · ${weather.temp}°C · ${weather.name}`);
+hud.setSeed(WORLD_SEED, SEED_SHARED, rideLink());
 
 const photo = new PhotoMode({ camera, renderer, scene, composer, canvas });
 

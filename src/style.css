@@ -108,6 +108,18 @@ html, body {
   color: rgba(180, 198, 230, 0.5); text-align: center; text-transform: lowercase;
   margin-top: -8px;
 }
+#start .seed {
+  font-size: 10px; letter-spacing: 0.28em; text-transform: lowercase;
+  color: rgba(180, 198, 230, 0.42);
+}
+#start .seed button {
+  font: inherit; letter-spacing: inherit; text-transform: inherit;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--cyan); opacity: 0.8;
+  border-bottom: 1px solid rgba(87, 232, 255, 0.28);
+}
+#start .seed button:hover { opacity: 1; }
+
 #start .back {
   font-size: 11px; letter-spacing: 0.26em; color: var(--cyan);
   opacity: 0.72; text-shadow: 0 0 22px rgba(87, 232, 255, 0.4);

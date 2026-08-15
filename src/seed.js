@@ -16,13 +16,28 @@
  * The default is the calendar day, so without asking for anything everyone is
  * on tonight's road together, and tomorrow everyone is somewhere else.
  */
+/** True when the seed came from a link rather than from tonight's date. */
+export let SEED_SHARED = false;
+
 export const WORLD_SEED = (() => {
   try {
     const asked = new URLSearchParams(location.search).get('seed');
-    if (asked !== null && /^[0-9]{1,10}$/.test(asked)) return Number(asked) >>> 0;
+    if (asked !== null && /^[0-9]{1,10}$/.test(asked)) { SEED_SHARED = true; return Number(asked) >>> 0; }
   } catch { /* no location: a test harness, or a worker */ }
   return Math.floor(Date.now() / 86400000) >>> 0;
 })();
+
+/** The address of this exact night, for handing to somebody. */
+export function rideLink(seed = WORLD_SEED) {
+  try {
+    const u = new URL(location.href);
+    u.search = `?seed=${seed}`;
+    u.hash = '';
+    return u.toString();
+  } catch {
+    return `?seed=${seed}`;
+  }
+}
 
 /**
  * A number from a name, not from a running stream.
