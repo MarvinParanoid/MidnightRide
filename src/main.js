@@ -328,6 +328,17 @@ document.addEventListener('keydown', (e) => {
       hud.toast(debugOff.shafts ? 'LIGHT SHAFTS OFF' : 'LIGHT SHAFTS ON');
       return;
     }
+    /* The profile, by hand. The guard picks one from the frame rate and takes
+       four seconds to change its mind, which is right for a player and useless
+       for looking at a fault that only appears on one profile — and `?q=low`
+       needs a reload, which loses wherever you had got to. Note this is the
+       guard's own step, so it keeps choosing from here rather than snapping
+       back to what it had decided before. */
+    if (e.code === 'Digit4') {
+      guard.step((guard.index + 1) % TIERS.length);
+      hud.toast(`QUALITY: ${TIERS[guard.index].name.toUpperCase()}`);
+      return;
+    }
     if (e.code === 'Digit3') {
       debugOff.decals = !debugOff.decals;
       hud.toast(debugOff.decals ? 'ROAD LIGHT OFF' : 'ROAD LIGHT ON');

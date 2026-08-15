@@ -51,14 +51,25 @@ import { isTouchDevice } from './input.js';
    the most expensive one in the chain: each tap costs three texture reads,
    because the chromatic split needs the channels separately. Five taps is
    fifteen reads per pixel of the screen. */
-/* smaa is three extra full-screen passes. The low profile is the one profile
-   that has no multisampling at all, so it is the one that would gain most from
-   it and the one least able to pay — and it is reached by stepping down from a
-   frame rate that was already poor. Edges lose. */
+/* The low profile, rebalanced against the measured price of each setting rather
+   than by dropping everything at once.
+   It used to have no antialiasing of any kind — no multisampling, no post pass
+   — which is the profile a struggling machine is sent to and the one where the
+   staircase measured worst of the three. And it had the smallest bloom buffer,
+   which is the setting that makes street lamps pulse: frame-to-frame jitter of
+   the light above the horizon went 0.5x -> 12.5%, 1x -> 8.8%, 1.5x -> 7.5%. So
+   the cheap profile got both the worst edges and the worst flicker.
+   Priced on a real card (bench.mjs --knobs), turning smaa off is worth x0.82
+   and shrinking the bloom buffer to a third only x0.94 — while pixels are dead
+   linear, x0.48 for half of them. So both are bought back and paid for out of
+   resolution: smaa on, bloom buffer to 1.0, pixel ceiling 1.4 -> 1.05 Mpx.
+   Composed, that is x1.22 * x1.06 * x0.75, which lands within a few per cent of
+   where it was. Predicted from measurements rather than measured as a whole,
+   and worth confirming on a second card. */
 export const TIERS = [
   { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 48, smaa: true, maxPixels: 3.3e6, gradeTaps: 5 },
   { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 22, smaa: true, maxPixels: 2.2e6, gradeTaps: 4 },
-  { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12, smaa: false, maxPixels: 1.4e6, gradeTaps: 3 },
+  { name: 'low', pixelRatio: 1.0, bloomScale: 1.0, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12, smaa: true, maxPixels: 1.05e6, gradeTaps: 3 },
 ];
 
 /** Where to start before we know anything. Phones start low; everything else high. */

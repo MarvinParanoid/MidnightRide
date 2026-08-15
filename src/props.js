@@ -382,7 +382,16 @@ function city(ctx) {
       const rows = Math.max(1, h / 3.2) | 0;
       /* Offset into the window texture per face, or every building in the city
          lights the same rooms. */
-      const wall = (cx, cz, ax, az, cols) => {
+      /* The outward direction is passed in so the quad can be wound to face it.
+         Both ends were built from the same tangent vector, which means one of
+         them wound the other way round and its face pointed into the building.
+         That was survivable only because the material drew both sides — and
+         drawing both sides is what let the far wall of every building add its
+         windows straight through the shell, which is the back faces showing
+         through. Wind them all outward and one side is enough. */
+      const wall = (cx, cz, ax, az, cols, outX, outZ) => {
+        // the quad's normal for this winding is perpendicular to (ax, az)
+        if (-az * outX + ax * outZ < 0) { ax = -ax; az = -az; }
         const u = (rnd() * 4) | 0, v = (rnd() * 4) | 0;
         win.quad(
           new THREE.Vector3(cx - ax, y0, cz - az),
@@ -395,12 +404,14 @@ function city(ctx) {
 
       const face = ctx.at(s, lat - side * (depth / 2 + 0.06), 0);
       const along = ctx.forward(s).multiplyScalar(w / 2 - 0.4);
-      wall(face.x, face.z, along.x, along.z, Math.max(1, w / 5) | 0);
+      const outFace = ctx.right(s).multiplyScalar(-side);
+      wall(face.x, face.z, along.x, along.z, Math.max(1, w / 5) | 0, outFace.x, outFace.z);
 
       const across = ctx.right(s).multiplyScalar(depth / 2 - 0.4);
       for (const end of [-1, 1]) {
         const e = ctx.at(s + end * (w / 2 + 0.06), lat, 0);
-        wall(e.x, e.z, across.x, across.z, Math.max(1, depth / 5) | 0);
+        const out = ctx.forward(s).multiplyScalar(end);
+        wall(e.x, e.z, across.x, across.z, Math.max(1, depth / 5) | 0, out.x, out.z);
       }
 
       // aircraft warning beacon on the tall ones

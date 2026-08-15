@@ -32,6 +32,8 @@ like a broken game.
 | `R` | cycle the rain |
 | `M` | music on/off |
 | `T` | push the clock forward an hour |
+| `` ` `` | the developer panel — frame times, GPU time, what the reflections found |
+| `1` … `4` | reflections · light shafts · road decals · quality profile |
 
 ## Riding itself
 
@@ -57,9 +59,11 @@ the throttle open. Drag down on the right to brake.
 
 Quality adapts to what the machine actually does rather than to what it claims
 to be. Everything but a phone starts on the high tier; if the frame rate stays
-under 45 for four seconds it steps down (pixel ratio, bloom resolution, rain
-density, environment refresh), and it steps back up if the frame rate recovers
-and holds. The first version guessed from core count and window height, and put
+under 45 for four seconds it steps down and it steps back up if the frame rate
+recovers and holds. A profile sets the ceiling on the drawing buffer, how much
+multisampling and post-process antialiasing it can afford, the bloom buffer's
+resolution, how far the reflection pass may march, how many taps the radial blur
+takes, rain density and how often the environment map is rebaked. The first version guessed from core count and window height, and put
 a desktop running at 76 fps into the cut-down renderer — the telemetry caught it
 in the very first session. Landscape only — portrait asks you to turn the phone.
 
@@ -67,8 +71,8 @@ in the very first session. Landscape only — portrait asks you to turn the phon
 
 Nothing here is an asset file. There are no models, no textures and no audio in
 the repository — all of it is built at runtime, which is why the whole thing
-loads instantly and ships as one 800 kB bundle (210 kB gzipped), nearly all of
-it Three.js.
+loads instantly and ships as one 950 kB bundle (280 kB gzipped), nearly all of
+it Three.js and its antialiasing lookup tables.
 
 **The road** is a centreline defined as a pure function of distance: curvature
 and elevation are sums of sines, so kilometre 4,182 looks the same on every run
@@ -133,8 +137,15 @@ The game reads your clock and your time zone. It names the place from the zone
 (`Europe/Berlin` → `Berlin`), and the sky is graded to the actual hour: dusk at
 19:00, deep black at 03:00, the first blue at 05:20. Start it at noon and the
 daylight hours are folded into the small hours instead — it is still Midnight
-Ride. The weather is fixed for the calendar day, so tonight's rain is the same
-rain every time you come back to it tonight.
+Ride.
+
+The weather is chosen for the calendar day and it is the same weather every time
+you come back to it tonight — but it is a description of the night rather than a
+constant. Showers arrive and pass as you ride: a Heavy Rain night is wet about
+seven tenths of the way with breaks in it, a Clear one catches one shower in
+twenty-five kilometres. The road then keeps the water for a while after the rain
+stops, because tarmac soaks in seconds and dries in minutes, and that lag is
+most of what makes a wet road look rained on rather than switched on.
 
 ## Layout
 
@@ -150,16 +161,26 @@ src/
   events.js      the aeroplane, the train, the other rider, the storm
   rain.js        5000 GPU-resident streaks
   sky.js         gradient dome, stars, moon, environment map
-  postfx.js      bloom, radial speed blur, chromatic fringe, grain
-  timeofday.js   clock → palette; time zone → place; day → weather
+  postfx.js      screen-space reflections, bloom held still between frames,
+                 radial speed blur, chromatic fringe, grain, SMAA
+  glow.js        every glow in the game, in one instanced draw call
+  timeofday.js   clock → palette; time zone → place; distance → weather
   hud.js         the interface
+  devhud.js      the developer panel, and the frame-time graph
+  gputime.js     what the GPU actually spent, via the timer query
   input.js       keyboard and relative-drag touch
   autopilot.js   rides for you when you stop
-  quality.js     what to cut on a small device
+  quality.js     the profiles, and the guard that picks between them
+  photo.js       the free camera and the bokeh pass
+  stream.js      the channel mode
+  telemetry.js   one beacon per session, if an endpoint was given
   audio/
     core.js      context, bus, convolution reverb, noise
     engine.js    engine, wind, tyres, rain, whoosh
     music.js     the generative synthwave sequencer
+    stations.js  the four stations and what makes each one itself
+    traffic.js   the other vehicles, heard: doppler from the geometry
+tools/test/      the suite; see tools/test/README.md
 ```
 
 ## Photo mode
@@ -251,6 +272,38 @@ One implementation note worth keeping: the body is JSON but goes out as
 triggers a preflight — and a beacon fired during `pagehide` does not survive the
 round trip. The request dies as an unanswered `OPTIONS` and you get silence
 instead of data. The receiver just parses the body itself.
+
+## Tests
+
+```bash
+npm test                    # everything
+npm test -- visual          # one suite: music, world, budgets, visual
+npm test -- visual --update # re-record the golden frames, then look at them
+node tools/test/bench.mjs --knobs   # what each quality setting costs, on the real GPU
+```
+
+Nothing here is deterministic by nature — the road is seeded but the bike, the
+autopilot and the audio all reach for `Math.random`, and the sky reads the wall
+clock — so the harness replaces both clocks before any page script runs and
+halts the frame loop, and time then only passes when a test asks for it. Two
+runs of the same drive render the same bytes, which is what makes a golden frame
+a test rather than a coin toss.
+
+Correctness runs on SwiftShader, the software renderer, because every machine
+draws identical bytes there. Cost runs on the actual graphics card, because on
+SwiftShader the price of filling a pixel bears no relation to what a GPU charges
+— a change that halves the fill rate can measure as a slowdown. The two are
+never mixed.
+
+`bench.mjs --knobs` prices one setting at a time by alternating it frame by
+frame against an untouched profile, which is the only way to get a number out of
+a card that changes its own clocks between one measurement and the next. Its
+first row is the same profile compared with itself: that row has to come out at
+1.00, and how far it strays is the smallest difference the rig can see.
+
+## Licence
+
+MIT. The code, and everything it generates, is yours to do as you like with.
 
 ## Console handle
 

@@ -362,9 +362,16 @@ export class Bike {
     const col = new Float32Array(n * 3);
     this.sprayLife = new Float32Array(n);
     this.sprayTone = new Float32Array(n);        // how bright this droplet ever gets
+    /* Sideways drift, decided once when the droplet is thrown and kept. It used
+       to be a fresh random number every frame, which is a random walk: the
+       cloud did not drift, it boiled, and eleven hundred droplets each jumping
+       to a new place sixty times a second read as a crawling crust on the road
+       rather than as water in the air. */
+    this.sprayVx = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       this.sprayLife[i] = Math.random();
       this.sprayTone[i] = 0.35 + Math.random() * 0.65;
+      this.sprayVx[i] = (Math.random() - 0.5) * 1.6;
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -372,7 +379,12 @@ export class Bike {
     this.sprayMat = new THREE.PointsMaterial({
       map: a.tex.dot,          // no mipmaps: a mipped point sprite renders square
       color: 0x7d90b0,
-      size: 0.26,
+      /* Large and faint, so they overlap. Overlap is the whole trick: a mist
+         you cannot count is one where no single droplet is bright enough to
+         see on its own and there are enough of them that they are always on top
+         of one another. Going the other way — small and bright — was tried and
+         made it worse, a scatter of hard grains instead of a soft crust. */
+      size: 0.34,
       vertexColors: true,          // per-droplet brightness, and a fade with age
       transparent: true,
       opacity: 0,
@@ -481,7 +493,7 @@ export class Bike {
 
   updateSpray(dt, speed, rain) {
     const amount = clamp(speed / 30, 0, 1) * rain;
-    this.sprayMat.opacity = amount * 0.04;
+    this.sprayMat.opacity = amount * 0.022;   // faint enough that only the overlap shows
     if (amount <= 0.01) return;
     const p = this.spray.geometry.attributes.position;
     const c = this.spray.geometry.attributes.color;
@@ -497,10 +509,11 @@ export class Bike {
         // stagger the birth along the trail, or the whole cloud is reborn
         // together and the plume pulses instead of hanging there
         arr[i3 + 2] = 1.0 + Math.random() * 0.8;
+        this.sprayVx[i] = (Math.random() - 0.5) * 1.6;
       } else {
         const t = 1 - this.sprayLife[i];
         // the plume widens as it falls behind rather than staying a rope
-        arr[i3] += (Math.random() - 0.5) * (1.1 + t * 2.6) * dt;
+        arr[i3] += this.sprayVx[i] * (0.6 + t * 1.8) * dt;
         arr[i3 + 1] = 0.06 + t * t * 1.3;
         arr[i3 + 2] += (2 + speed * 0.28) * dt;
       }
