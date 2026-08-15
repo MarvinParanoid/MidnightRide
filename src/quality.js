@@ -154,7 +154,17 @@ const WARMUP = 3;        // shaders are still compiling; ignore the first frames
    spend a quarter of the linear resolution and no more; below that the answer
    is a cheaper profile, not a blurrier one. */
 const SCALE_MIN = 0.75;
-const SCALE_MAX = 1.0;       // never more than the profile already allows
+/* Above one, deliberately.
+   The profile's density is a starting point, not a ceiling — the ceilings are
+   the device's own pixel ratio and the profile's pixel budget, and applyTier
+   applies both. On a phone the low profile asks for a density of 1.0, which on
+   a Pixel-class screen is 915x412 stretched over 2400x1080: a seventh of the
+   pixels the panel has, and 0.38 of the 0.9 megapixels the profile itself
+   allows. Nothing could ever discover that, because a controller that only
+   subtracts cannot find headroom it was never given.
+   It still starts at 1.0 and still has to earn its way up on measured frames,
+   so a phone that cannot cope is never asked to try for long. */
+const SCALE_MAX = 1.5;
 /* A dead band, and nothing inside it.
    A sixty-hertz frame is 16.7 ms. The first two versions aimed at a number
    inside that and crept towards it every window, which means a machine sitting

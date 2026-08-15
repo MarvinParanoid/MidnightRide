@@ -362,9 +362,13 @@ function applyTier(tier) {
      in absolute terms. The second one only bites on a large window, which is
      exactly where the first one stopped helping. */
   const cap = Math.sqrt(tier.maxPixels / Math.max(1, innerWidth * innerHeight));
-  /* The profile sets the ceiling; the resolution controller decides how much of
-     it is actually spent, frame rate permitting. */
-  renderer.setPixelRatio(Math.min(devicePixelRatio, tier.pixelRatio, cap) * renderScale);
+  /* The controller scales the profile's density, and the two hard ceilings then
+     apply to the result: the screen's own pixel ratio, past which there is
+     nothing to gain, and the profile's pixel budget. Applying it the other way
+     round — scaling after the ceilings — meant the scale could only ever take
+     pixels away, and on a phone the density ceiling of 1.0 bound long before
+     the budget did. */
+  renderer.setPixelRatio(Math.min(devicePixelRatio, tier.pixelRatio * renderScale, cap));
   renderer.setSize(innerWidth, innerHeight);
   // in drawing-buffer pixels, or the post chain silently halves on HiDPI
   renderer.getDrawingBufferSize(viewSize);
