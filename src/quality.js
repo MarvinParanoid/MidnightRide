@@ -83,11 +83,20 @@ import { isTouchDevice } from './input.js';
    when the edges have already been dealt with. Reported from the saddle as "the
    picture has gone soapier, even on high", and it was two things at once: this
    and the resolution controller buying headroom nobody asked for.
-   Low has no multisampling and no other answer, so there it earns its keep. */
+   Low has no multisampling and no other answer, so there it earns its keep.
+   The bloom buffer went back to a third, and the argument for enlarging it did
+   not survive being measured. The figures it rested on — jitter of the light
+   above the horizon at 12.5% for 0.5x against 8.8% for 1x — were taken before
+   the bloom was held still between frames, and that pass now absorbs most of
+   what the buffer size used to decide. Measured again over the same stretch of
+   city ridden twice: 17.01% against 16.11%, nine tenths of a percentage point.
+   Not worth paying for in resolution. What the pixels are worth is no longer
+   guessed here either — freeing them lets the resolution controller find the
+   number at runtime, which is the whole reason it exists. */
 export const TIERS = [
   { name: 'high', pixelRatio: 1.75, bloomScale: 1.5, rain: 1.0, envEvery: 6, samples: 2, ssrSteps: 48, smaa: false, maxPixels: 3.3e6, gradeTaps: 5 },
   { name: 'mid', pixelRatio: 1.25, bloomScale: 0.7, rain: 0.6, envEvery: 9, samples: 2, ssrSteps: 22, smaa: false, maxPixels: 2.2e6, gradeTaps: 4 },
-  { name: 'low', pixelRatio: 1.0, bloomScale: 1.0, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12, smaa: true, maxPixels: 0.9e6, gradeTaps: 3 },
+  { name: 'low', pixelRatio: 1.0, bloomScale: 0.5, rain: 0.32, envEvery: 14, samples: 0, ssrSteps: 12, smaa: true, maxPixels: 0.9e6, gradeTaps: 3 },
 ];
 
 /** Where to start before we know anything. Phones start low; everything else high. */
