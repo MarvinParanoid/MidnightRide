@@ -1,6 +1,7 @@
 {
   "name": "midnight-ride",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "An endless night ride. Procedural city, rain, neon, synthwave.",
