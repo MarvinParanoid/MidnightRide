@@ -147,12 +147,18 @@ function drive(dt) {
  * that matters most — the traffic becomes an instrument, and a good run does
  * not merely score well, it plays better.
  */
-const hit = { kick: 0, side: 1, flash: 0 };
+const hit = { kick: 0, side: 1, punch: 0, glow: 0, slow: 0 };
 function impact(e) {
   const force = e.worth / 8;                 // CLOSE is an eighth of NO WAY
   hit.kick = Math.max(hit.kick, 0.3 + force * 1.5);
   hit.side = e.side;
-  hit.flash = Math.max(hit.flash, 0.25 + force * 0.75);
+  /* Two stages, because one is a blink. The punch is gone in a tenth of a
+     second and is what you feel; the glow hangs about for the best part of a
+     second and is what tells you it happened. A single decay curve gave neither
+     — too short to register as an event, too long to feel like a hit. */
+  hit.punch = Math.max(hit.punch, 0.35 + force * 0.9);
+  hit.glow = Math.max(hit.glow, 0.2 + force * 0.8);
+
   if (engine) engine.whoosh(0.45 + force * 0.9);
   if (music && audio) {
     /* A snare for the close ones, a hat for the rest — chosen by how near it
@@ -162,7 +168,19 @@ function impact(e) {
        yet. Off-grid is the honest version of this until it does. */
     if (force > 0.45) music.snare(audio.t);
     else music.hat(audio.t, 0.5 + force, force > 0.2);
+    /* And shove the energy up by hand rather than waiting for it to drift.
+       The track chases the meter with a second and a half of lag and the layer
+       gates smooth it further, so a magnificent pass used to produce no audible
+       consequence at the moment it happened — which is the whole promise of
+       the thing: what you did should be what you hear. */
+    music.energy = Math.min(1, music.energy + force * 0.28);
   }
+
+  /* And for the two tightest bands, the world takes a breath. A tenth of a
+     second at just under half speed is the strongest single device this genre
+     has: it says "that mattered" without a word of interface, and it costs
+     nothing but a multiplier on the timestep. */
+  if (e.worth >= 4) hit.slow = 1;
 }
 
 /* ── the loop ───────────────────────────────────────────────── */
@@ -218,8 +236,12 @@ function frame() {
   last = now;
   clock += dt;
 
+  /* The world's own clock, which is not quite the wall's. */
+  hit.slow = Math.max(0, hit.slow - dt * 7.5);
+  const simDt = dt * (1 - hit.slow * 0.55);
+
   const live = started && !run.frozen;
-  if (live) drive(dt);
+  if (live) drive(simDt);
 
   road.update(state.s);
   const pal = palette(nightHourFromLocal());
@@ -236,17 +258,17 @@ function frame() {
   road.point(state.s, state.lat, 0, here);
   const p = road.poseAt(state.s);
   bike.setPose(here, p.h, p.pitch);
-  bike.update(live ? dt : 0, {
+  bike.update(live ? simDt : 0, {
     speed: state.v, steer: state.steer, throttle: input.throttle,
     brake: input.brake, rpm: engine ? engine.rpm : 1200,
     rain: rainAmount, wobble: 0, beamFade: 1,
   });
-  if (live) traffic.update(dt, state.s, state.lat, state.v);
+  if (live) traffic.update(simDt, state.s, state.lat, state.v);
 
   /* the one disagreement with the other game */
   proximity(traffic.cars, state.s, state.lat, state.v, nearby);
   if (live) {
-    for (const e of scoring.update(dt, state.v, nearby)) {
+    for (const e of scoring.update(simDt, state.v, nearby)) {
       if (e.kind === 'brush') impact(e);
       if (e.kind === 'pass') board.pass(e);
       if (e.kind === 'combo-lost') board.comboLost();
@@ -257,7 +279,7 @@ function frame() {
       if (music) music.enabled = false;
     }
   }
-  run.update(dt, state.v, state.s);
+  run.update(simDt, state.v, state.s);
   if (run.state === 'riding') pressed = false;
   if (run.canRestart && pressed) {
     if (music) music.enabled = true;
@@ -267,7 +289,8 @@ function frame() {
   /* the camera: one angle, close, and it does not wander — except when
      something has just gone past close enough to shove it */
   hit.kick = Math.max(0, hit.kick - dt * 4.2);
-  hit.flash = Math.max(0, hit.flash - dt * 3.4);
+  hit.punch = Math.max(0, hit.punch - dt * 9);       // gone in a tenth of a second
+  hit.glow = Math.max(0, hit.glow - dt * 1.3);       // and a second of afterglow
   cam.back = damp(cam.back, 6.6 + state.v * 0.035, 5, dt);
   cam.lat = damp(cam.lat, state.lat * 0.85 - hit.side * hit.kick * 0.5, 6, dt);
   road.point(state.s - cam.back, cam.lat, 2.15 + hit.kick * 0.12, camPos);
@@ -300,13 +323,24 @@ function frame() {
   }
 
   grade.uniforms.uTime.value = clock;
-  grade.uniforms.uSpeed.value = Math.pow(clamp(state.v / 62, 0, 1.1), 1.6);
+  /* Speed has to be visible, not merely printed. The other game's curve is
+     drawn for a hundred and ninety and reads at three hundred as barely more
+     than at two hundred; this one keeps climbing where the speedometer does. */
+  grade.uniforms.uSpeed.value = Math.pow(clamp(state.v / TOP, 0, 1), 1.25) * 1.35;
   grade.uniforms.uWet.value = rainAmount * 0.4;
   /* The colour tears for a moment, and the lights swell. Both are the existing
      look pushed briefly past where it normally sits, rather than a new effect —
      which is why it reads as the world reacting rather than as a filter. */
-  grade.uniforms.uAberration.value = 1 + hit.flash * 5;
-  bloom.strength = 0.95 + scoring.meter * 0.25 + hit.flash * 0.7;
+  /* Heat. The tear and the swell are the punch; the rest is the state of the
+     run, and it is the part that was missing — a combo of eight looked exactly
+     like a combo of one, so nothing about the world said you were doing well.
+     Now the colour opens up, the corners lift and the lights grow as it goes,
+     and a run that is going somewhere looks like one. */
+  const heat = Math.min(1, scoring.combo / 12) * scoring.meter;
+  grade.uniforms.uAberration.value = 1 + hit.punch * 6 + heat * 1.2;
+  grade.uniforms.uVignette.value = 1 - heat * 0.45;
+  grade.uniforms.uGrain.value = 0.055 + hit.punch * 0.05;
+  bloom.strength = 0.95 + scoring.meter * 0.3 + heat * 0.45 + hit.punch * 0.8 + hit.glow * 0.35;
 
   assets().glowField.update(scene);
   board.update(dt, { score: scoring.score, combo: scoring.combo, meter: scoring.meter,
@@ -343,7 +377,15 @@ window.__rl = { THREE, renderer, scene, camera, road, bike, traffic, state, scor
      every object updated correctly and the master gain was zero. */
   /* What the last near miss did to the frame, for checking that it did it. */
   probe: () => ({ aberration: grade.uniforms.uAberration.value, bloom: bloom.strength,
-    kick: hit.kick, flash: hit.flash }),
+    vignette: grade.uniforms.uVignette.value, speed: grade.uniforms.uSpeed.value,
+    kick: hit.kick, punch: hit.punch, glow: hit.glow, slow: hit.slow }),
+  /* recompute the colour from the current combo without waiting for a frame */
+  probeHeat: () => {
+    const heat = Math.min(1, scoring.combo / 12) * scoring.meter;
+    grade.uniforms.uAberration.value = 1 + hit.punch * 6 + heat * 1.2;
+    grade.uniforms.uVignette.value = 1 - heat * 0.45;
+    bloom.strength = 0.95 + scoring.meter * 0.3 + heat * 0.45 + hit.punch * 0.8 + hit.glow * 0.35;
+  },
   audioProbe: () => (audio ? {
     context: audio.ctx.state,
     master: +audio.master.gain.value.toFixed(3),
