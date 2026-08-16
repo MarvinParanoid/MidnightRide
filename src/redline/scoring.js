@@ -66,6 +66,18 @@ export class Scoring {
   }
 
   /**
+   * Start the meter where the current speed would hold it, rather than at zero.
+   *
+   * A run begins at a hundred and seventy and the meter took ten seconds to
+   * climb to what that speed sustains — ten seconds of a game whose entire
+   * feedback is the soundtrack, played almost silent. Reported as "there is no
+   * driving music", and it was not the music.
+   */
+  prime(speed) {
+    this.meter = Math.min(0.62, Math.max(0, (speed - 14) / 62));
+  }
+
+  /**
    * @param dt      seconds
    * @param speed   metres per second
    * @param near    a reading from proximity(): { nearest, clearance, closing }

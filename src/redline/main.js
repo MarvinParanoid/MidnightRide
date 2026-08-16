@@ -73,7 +73,7 @@ const weather = weatherForToday();
 const board = new Board(WORLD_SEED);
 
 /* ── the ride ───────────────────────────────────────────────── */
-const state = { s: 0, lat: 1.9, v: 0, steer: 0, throttle: 0, brake: 0 };
+const state = { s: 0, lat: 1.9, v: 0, latV: 0, steer: 0, throttle: 0, brake: 0 };
 const scoring = new Scoring();
 let run = new Run();
 
@@ -84,18 +84,44 @@ let run = new Run();
    control that really matters. */
 const TOP = 96;                    // metres per second, about 345 km/h
 const PUSH = 7.5;                  // how hard it pulls away on its own
+
+/**
+ * Arcade, but not weightless.
+ *
+ * The first version set the lateral speed straight from the steering key, which
+ * is the difference between riding a motorcycle and dragging a cursor: it went
+ * exactly where it was told, the instant it was told, and reported back as "too
+ * arcadey" within one session. A machine has to take a moment to agree with you
+ * and a moment to stop agreeing.
+ *
+ * So the sideways movement is a velocity with mass. It builds towards what the
+ * bars ask for and it carries on for a beat after they stop asking, which is
+ * what makes threading a gap a thing you commit to a fraction of a second early
+ * rather than a thing you do when you arrive.
+ *
+ * And it is slower to change its mind the faster you go, so speed is a decision
+ * with a cost rather than a free multiplier — while the brake sharpens the
+ * turn-in, because weight going onto the front wheel is what a bike does. That
+ * gives braking a second job beyond buying time: it is also how you make the
+ * tightest line. Which is the whole question the game is asking.
+ */
 function drive(dt) {
   const wants = input.throttle > 0.05 ? TOP : TOP * 0.62;
   state.v = damp(state.v, wants, PUSH / Math.max(8, state.v) * 1.4, dt);
   if (input.brake > 0.05) state.v = damp(state.v, 12, 1.9 * input.brake, dt);
   state.v = clamp(state.v, 6, TOP);
 
-  /* Steering that bites less the faster you go, so top speed is a commitment. */
-  const authority = 10.5 / (1 + state.v / 46);
-  state.steer = damp(state.steer, input.steer, 9, dt);
-  state.lat += state.steer * authority * dt;
+  const fast = Math.min(1, state.v / TOP);
+  const reach = 9.2 - fast * 3.6;                 // how far sideways it will go
+  const grip = 3.4 + input.brake * 2.6 - fast * 1.1;   // how fast it agrees to
+  state.steer = damp(state.steer, input.steer, 12, dt);
+  state.latV = damp(state.latV, state.steer * reach, grip, dt);
+  state.lat += state.latV * dt;
+
   state.lat -= road.curvature(state.s) * state.v * state.v * 0.16 * dt;
-  state.lat = clamp(state.lat, -ROAD_HALF - SHOULDER, ROAD_HALF + SHOULDER);
+  const edge = ROAD_HALF + SHOULDER;
+  if (state.lat > edge || state.lat < -edge) state.latV *= 0.3;   // the verge bites
+  state.lat = clamp(state.lat, -edge, edge);
   state.s += state.v * dt;
 }
 
@@ -115,7 +141,7 @@ let started = false;
 let last = performance.now() / 1000;
 let clock = 0;
 
-function begin() {
+async function begin() {
   if (started) return;
   started = true;
   document.body.classList.add('riding');
@@ -123,6 +149,13 @@ function begin() {
   engine = new EngineSound(audio);
   music = new Music(audio);
   music.enabled = true;
+  scoring.prime(state.v);
+  /* Without this there is no sound at all — not quiet, none. The context comes
+     up suspended and the master gain comes up at zero, and `start()` is what
+     undoes both. Leaving it out is a silent failure in the most literal sense:
+     everything else runs, the meter climbs, the engine object dutifully updates
+     its filters, and not one sample reaches the speakers. */
+  await audio.start();
 }
 
 function restart() {
@@ -131,6 +164,8 @@ function restart() {
   state.s += 240;                  // a clean stretch, rather than the wreck you left
   state.v = TOP * 0.5;
   state.lat = 1.9;
+  state.latV = 0;
+  scoring.prime(state.v);
   road.seek(state.s);
   road.update(state.s);
   board.begin();
@@ -210,7 +245,12 @@ function frame() {
       rain: rainAmount, enclosure: 0, offRoad: false,
       musicEnergy: music.enabled ? music.energy : 0,
     });
-    music.setContext({ biome: road.biomeAt(state.s), remote: 0, rain: rainAmount });
+    /* One station, and the fastest one there is.
+       The dial picks by biome for the other game, where drifting between four
+       moods over an hour is the point. Here the soundtrack is the scoreboard and
+       it may not wander off into ambient halfway through a run: INTERSTATE is
+       the one with tight drums and the highest tempo, and it stays. */
+    music.setContext({ biome: 'TUNNEL', remote: 0, rain: rainAmount });
     music.tick(scoring.meter, dt);
   }
 
@@ -246,4 +286,13 @@ frame();
 
 /* a handle for poking at it from the console, as the other game has */
 window.__rl = { THREE, renderer, scene, camera, road, bike, traffic, state, scoring,
-  get run() { return run; }, board, restart };
+  get run() { return run; }, board, restart,
+  get music() { return music; }, get engine() { return engine; },
+  /* Is anything actually going to come out of the speakers? Asked from the
+     outside, because the failure this answers was invisible from the inside:
+     every object updated correctly and the master gain was zero. */
+  audioProbe: () => (audio ? {
+    context: audio.ctx.state,
+    master: +audio.master.gain.value.toFixed(3),
+    music: music ? { on: music.enabled, energy: +music.energy.toFixed(2), bpm: Math.round(music.bpm) } : null,
+  } : 'no audio yet') };
