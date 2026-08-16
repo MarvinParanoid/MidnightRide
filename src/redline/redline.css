@@ -1,0 +1,60 @@
+/* The arcade interface: four things and a card. Everything else the player
+   needs is coming out of the speakers. */
+#board {
+  position: fixed; inset: 0; pointer-events: none; z-index: 5;
+  font-family: var(--mono, ui-monospace, monospace);
+  color: #dbe6ff;
+}
+#board .score {
+  position: absolute; top: 26px; left: 32px;
+  font-size: 34px; font-weight: 200; letter-spacing: 0.1em;
+  text-shadow: 0 0 26px rgba(120, 190, 255, 0.35);
+}
+#board .score i { font-style: normal; font-size: 17px; opacity: 0.62; margin-left: 10px; }
+#board .speed { position: absolute; bottom: 26px; left: 32px; }
+#board .speed b { font-size: 46px; font-weight: 200; letter-spacing: 0.04em; }
+#board .speed span { font-size: 11px; letter-spacing: 0.3em; opacity: 0.45; margin-left: 8px; }
+
+/* The meter, as a hairline. It is a confirmation of what you can hear, not the
+   instrument itself — so it gets one pixel and no numbers. */
+#board .meter {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: rgba(120, 160, 220, 0.12);
+}
+#board .meter i {
+  display: block; height: 100%; transform-origin: 0 50%; transform: scaleX(0);
+  background: linear-gradient(90deg, #2f6df0, #ff2b6b);
+  transition: transform 0.12s linear;
+}
+#board.redline .meter i { box-shadow: 0 0 18px 2px rgba(255, 43, 107, 0.75); }
+
+#board .call {
+  position: absolute; left: 0; right: 0; top: 33%;
+  text-align: center; font-size: 30px; letter-spacing: 0.34em;
+  opacity: 0; transform: scale(0.94);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+#board .call.show { opacity: 1; transform: scale(1); transition-duration: 0.06s; }
+#board .call.band-close { color: #9fd0ff; }
+#board .call.band-near-miss { color: #ffd27a; }
+#board .call.band-thread { color: #ff9a3c; text-shadow: 0 0 30px rgba(255, 154, 60, 0.5); }
+#board .call.band-no-way { color: #ff3b6b; text-shadow: 0 0 40px rgba(255, 59, 107, 0.65); }
+
+#board .card {
+  position: absolute; inset: 0; display: none;
+  flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+  background: radial-gradient(ellipse 70% 60% at 50% 50%, rgba(4,5,10,0.82), rgba(4,5,10,0.96));
+}
+#board.over .card { display: flex; }
+#board .card h2 { font-weight: 200; letter-spacing: 0.42em; font-size: 20px; opacity: 0.8; }
+#board .card dl {
+  display: grid; grid-template-columns: auto auto; gap: 6px 26px;
+  font-size: 13px; letter-spacing: 0.16em;
+}
+#board .card dt { opacity: 0.45; text-transform: lowercase; }
+#board .card dd { margin: 0; text-align: right; }
+#board .card p { font-size: 11px; letter-spacing: 0.28em; opacity: 0.5; text-transform: lowercase; }
+#board .seed {
+  position: absolute; right: 26px; bottom: 22px;
+  font-size: 10px; letter-spacing: 0.26em; opacity: 0.3; text-transform: lowercase;
+}

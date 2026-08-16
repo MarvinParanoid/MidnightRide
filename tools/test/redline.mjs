@@ -8,6 +8,7 @@
  * thirty frames a second is a curve you will argue about rather than measure.
  */
 import { Scoring, BANDS } from '../../src/redline/scoring.js';
+import { Run } from '../../src/redline/run.js';
 
 /** A car going past, as the proximity reading would describe it. */
 function pass(scoring, { closest, speed = 60, frames = 13 }) {
@@ -86,5 +87,38 @@ export async function run() {
       || 'no pass was scored at all');
 
   add('there are bands to score against', BANDS.length === 4, `${BANDS.length} bands`);
+
+  /* The run, and the thing the whole loop rests on: how long after getting it
+     wrong you are riding again. */
+  const r = new Run();
+  let s0 = 0;
+  for (let i = 0; i < 60 * 30; i++) { s0 += 62 / 60; r.update(1 / 60, 62, s0); }
+  const alive = { t: r.time, km: r.distance / 1000, top: r.topSpeed };
+  r.crash();
+  let waited = 0;
+  while (!r.canRestart && waited < 3) { waited += 1 / 60; r.update(1 / 60, 0, s0); }
+  add('you are riding again within half a second of getting it wrong',
+    waited < 0.5 && r.canRestart,
+    `${waited.toFixed(2)} s from impact to being able to go again`);
+
+  add('the world holds still while it waits',
+    r.frozen && new Run().frozen === false,
+    `frozen after a crash: ${r.frozen}; frozen while riding: ${new Run().frozen}`);
+
+  /* A crash mid-pass still scores the pass that was in progress. */
+  const sc = new Scoring();
+  const car = {};
+  for (let i = 0; i < 8; i++) sc.update(1 / 60, 60, { nearest: car, clearance: 0.3, closing: 9 });
+  const onCrash = [...sc.crash ? (sc.crash(), sc.events) : []];
+  add('the pass you were in the middle of still counts',
+    onCrash.some((e) => e.kind === 'pass'),
+    onCrash.map((e) => e.kind).join(', ') || 'nothing was scored');
+
+  const card = r.summary(sc);
+  add('the card is four numbers and no grade',
+    card.topKmh === Math.round(alive.top * 3.6) && card.seconds > 29 && card.km > 1,
+    `${card.score} points, ${card.seconds.toFixed(0)} s, ${card.km.toFixed(1)} km, `
+      + `top ${card.topKmh} km/h, ${card.passes} passes`);
+
   return results;
 }

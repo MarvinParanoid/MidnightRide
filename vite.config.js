@@ -16,10 +16,18 @@ export default ({ command, isPreview }) => ({
   server: { host: '127.0.0.1', port: 5173, open: false },
   // the built itch copy lives in the project root; without this the dev server
   // scans its index.html as a second entry and re-optimises on every start
-  optimizeDeps: { entries: ['index.html'] },
+  optimizeDeps: { entries: ['index.html', 'redline.html'] },
   build: {
     target: 'es2022',
     outDir: itch ? 'dist-itch' : 'dist',
     chunkSizeWarningLimit: 2000,
+    /* Two games, one engine, one build. They share every module they have in
+       common, so the second page costs its own few hundred lines and not
+       another copy of Three.js — which is the whole argument for keeping them
+       in one repository rather than two.
+       The itch upload stays a single game: that store page is Midnight Ride. */
+    rollupOptions: itch ? undefined : {
+      input: { main: 'index.html', redline: 'redline.html' },
+    },
   },
 });
