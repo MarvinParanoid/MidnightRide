@@ -26,6 +26,7 @@ export class Board {
         <p>press anything to ride it again</p>
       </div>
       <div class="seed">tonight · #${seed}</div>
+      <div class="flash" data-flash></div>
     `;
     document.body.appendChild(el);
     this.el = el;
@@ -52,6 +53,14 @@ export class Board {
   comboLost() {
     const call = this.q('call');
     if (call.textContent) call.className = 'call';
+  }
+
+  /** A white hit, for the frame you got it wrong. */
+  flash() {
+    const f = this.q('flash');
+    f.classList.remove('on');
+    void f.offsetWidth;             // restart the animation rather than ignore it
+    f.classList.add('on');
   }
 
   crash(summary) {

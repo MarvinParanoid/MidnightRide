@@ -102,6 +102,25 @@ export class Music {
   }
 
   /**
+   * Stop dead, rather than fade out.
+   *
+   * Switching the radio off eases every layer down over the best part of a
+   * second, which is right when a rider turns the music off and quite wrong
+   * when they hit a lorry: the sound carrying on after the impact takes the
+   * impact with it. This cuts the layers to nothing on the sample, and the
+   * silence that follows is a large part of what the crash is.
+   */
+  cut() {
+    const t = this.core.t;
+    for (const k in this.layers) {
+      const g = this.layers[k].gain;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(0, t);
+    }
+    this.enabled = false;
+  }
+
+  /**
    * The audio time of the next step boundary at or after `t`.
    *
    * For anything outside the sequencer that wants to put a sound *in* the

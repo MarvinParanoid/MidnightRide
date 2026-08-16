@@ -157,9 +157,18 @@ export class Scoring {
     this.events.push({ kind: 'pass', band: band.name, clearance: clear, worth, combo: this.combo });
   }
 
-  /** The run is over. Everything stops; the score stands. */
+  /**
+   * The run is over. Everything stops; the score stands.
+   *
+   * The car you hit is not a pass and is thrown away rather than judged — it
+   * had a clearance, and that clearance was negative, and a card reading
+   * "closest: minus a hundred and nineteen centimetres" is a card describing
+   * the inside of a lorry. Passes completed before it keep their score; this
+   * one never finished.
+   */
   crash() {
-    this.commit(0);
+    this.current = null;
+    this.currentMin = Infinity;
     this.combo = 0;
     this.meter = 0;
     this.events.push({ kind: 'crash' });

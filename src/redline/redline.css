@@ -58,3 +58,15 @@
   position: absolute; right: 26px; bottom: 22px;
   font-size: 10px; letter-spacing: 0.26em; opacity: 0.3; text-transform: lowercase;
 }
+
+/* The frame you got it wrong. Bright, brief, and gone before the card. */
+#board .flash {
+  position: absolute; inset: 0; background: #fff; opacity: 0;
+  pointer-events: none;
+}
+#board .flash.on { animation: crashflash 0.42s ease-out forwards; }
+@keyframes crashflash {
+  0% { opacity: 0.82; }
+  18% { opacity: 0.3; background: #ff2b4a; }
+  100% { opacity: 0; background: #ff2b4a; }
+}

@@ -196,6 +196,55 @@ function impact(e) {
   if (e.worth >= 4) hit.slow = 1;
 }
 
+/**
+ * And what hitting one does.
+ *
+ * The same senses as a near miss, louder and in the other direction. Until now
+ * the end of a run was a card and a third of a second of nothing — in a game
+ * built on failing and going again, the moment of failure was the one moment
+ * with no feeling attached to it at all, which is a strange thing to leave out
+ * of half the loop.
+ *
+ * The music stops on the sample rather than fading, because silence is most of
+ * what a crash sounds like. Underneath it: a burst of noise closing from bright
+ * to dull as the energy goes out of it, and a body blow an octave and a half
+ * below where the engine lives. The screen takes a white hit and the camera is
+ * thrown, both decaying through the hold so that the card arrives into
+ * stillness rather than interrupting.
+ */
+function crashImpact(side) {
+  hit.kick = 2.4;
+  hit.side = side || 1;
+  hit.punch = 1.7;
+  hit.glow = 1.3;
+  hit.slow = 1;
+  board.flash();
+  if (music) music.cut();
+  if (!audio) return;
+
+  const ctx = audio.ctx;
+  const t = audio.t;
+  const n = ctx.createBufferSource();
+  n.buffer = audio.noise;
+  n.loop = true;
+  const lp = audio.filter('lowpass', 2600, 0.8);
+  const g = audio.gain(0.0001);
+  n.connect(lp); lp.connect(g); g.connect(audio.master);
+  g.gain.exponentialRampToValueAtTime(0.85, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+  lp.frequency.exponentialRampToValueAtTime(160, t + 0.45);
+  n.start(t); n.stop(t + 0.65);
+
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  const og = audio.gain(0.75);
+  o.connect(og); og.connect(audio.master);
+  o.frequency.setValueAtTime(124, t);
+  o.frequency.exponentialRampToValueAtTime(34, t + 0.28);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+  o.start(t); o.stop(t + 0.55);
+}
+
 /* ── the loop ───────────────────────────────────────────────── */
 const camPos = new THREE.Vector3(0, 3, 10);
 const camLook = new THREE.Vector3();
@@ -315,8 +364,8 @@ function frame() {
     /* No margin at all: the metal has to actually meet. */
     if (nearby.contact && run.crash()) {
       scoring.crash();
+      crashImpact(nearby.side);
       board.crash(run.summary(scoring));
-      if (music) music.enabled = false;
     }
   }
   run.update(simDt, state.v, state.s);

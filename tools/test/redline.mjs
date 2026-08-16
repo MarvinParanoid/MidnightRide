@@ -105,14 +105,17 @@ export async function run() {
     r.frozen && new Run().frozen === false,
     `frozen after a crash: ${r.frozen}; frozen while riding: ${new Run().frozen}`);
 
-  /* A crash mid-pass still scores the pass that was in progress. */
+  /* The car you hit is not a pass. */
   const sc = new Scoring();
+  pass(sc, { closest: 0.3, speed: 60 });          // one real pass, completed
+  const scored = sc.score;
   const car = {};
-  for (let i = 0; i < 8; i++) sc.update(1 / 60, 60, { nearest: car, clearance: 0.3, closing: 9 });
-  const onCrash = [...sc.crash ? (sc.crash(), sc.events) : []];
-  add('the pass you were in the middle of still counts',
-    onCrash.some((e) => e.kind === 'pass'),
-    onCrash.map((e) => e.kind).join(', ') || 'nothing was scored');
+  for (let i = 0; i < 8; i++) sc.update(1 / 60, 60, { nearest: car, clearance: -1.19, closing: 9 });
+  sc.crash();
+  add('the car you hit is not counted as a pass',
+    sc.score === scored && !(sc.best < 0),
+    `score stayed at ${sc.score.toFixed(1)}; closest of the run reads `
+      + `${Number.isFinite(sc.best) ? (sc.best * 100).toFixed(0) + ' cm' : '—'}`);
 
   const card = r.summary(sc);
   add('the card is four numbers and no grade',
