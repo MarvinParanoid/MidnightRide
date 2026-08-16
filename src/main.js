@@ -22,6 +22,7 @@ import { EngineSound } from './audio/engine.js';
 import { Music } from './audio/music.js';
 import { TrafficSound } from './audio/traffic.js';
 import { clamp, damp, smoothstep } from './geo.js';
+import { proximity } from './proximity.js';
 import { assets } from './assets.js';
 import { telemetry } from './telemetry.js';
 import { DevHud } from './devhud.js';
@@ -151,6 +152,9 @@ const camVel = new THREE.Vector3();
 const headingVec = new THREE.Vector3(0, 0, -1);
 const camLookPose = {};
 const lampPos = new THREE.Vector3();
+/* The traffic proximity reading, reused every frame; read and acted on
+   immediately, so one object rather than sixty a second. */
+const nearby = {};
 
 /** 1 when the beam should be at full strength, ~0 when the camera is staring
     down the barrel of the headlight from a few metres away. */
@@ -451,17 +455,17 @@ function drive(dt, c) {
   /* the corner throws you toward the outside line */
   const k = road.curvature(state.s);
   state.lat -= k * state.v * state.v * 0.16 * dt;
-  /* Traffic is solid enough to squeeze past, not solid enough to crash into.
-     Riding straight through a car looked worse than any collision would, so
-     coming level with one pushes you aside instead — a motorcycle filtering
-     past, which is what a bike would do anyway. No damage, no fail state. */
-  for (const car of traffic.cars) {
-    const ds = car.s - state.s;
-    if (Math.abs(ds) > car.len / 2 + 2.2) continue;
-    const dl = state.lat - car.lat;
-    if (Math.abs(dl) > 2.1) continue;
-    state.lat += (2.1 - Math.abs(dl)) * Math.sign(dl || 1) * 3.2 * dt;
-  }
+  /* How close the traffic is, measured once and shared: the audio wants the
+     same numbers for its doppler, and an arcade mode built on this world wants
+     them for something else again. The measuring lives in proximity.js and
+     says nothing about what to do; this is what Midnight Ride does about it.
+     Which is: nothing that could end the ride. Traffic is solid enough to
+     squeeze past and not solid enough to crash into — riding straight through a
+     car looked worse than any collision would, so coming level with one pushes
+     you aside instead, a motorcycle filtering past, which is what a bike would
+     do anyway. No damage, no fail state. */
+  proximity(traffic.cars, state.s, state.lat, state.v, nearby);
+  if (nearby.contact) state.lat += nearby.overlap * nearby.side * 3.2 * dt;
 
   /* You can put a wheel on the verge, but not drive out across the field: the
      bike rides at road height and the ground beside it is a metre lower, so
