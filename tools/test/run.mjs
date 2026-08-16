@@ -12,6 +12,7 @@ const SUITES = {
   music: () => import('./music.mjs'),
   determinism: () => import('./determinism.mjs'),
   seeded: () => import('./seeded.mjs'),
+  redline: () => import('./redline.mjs'),
   world: () => import('./world.mjs'),
   budgets: () => import('./budgets.mjs'),
   visual: () => import('./visual.mjs'),
