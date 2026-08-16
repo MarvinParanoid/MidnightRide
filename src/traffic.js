@@ -160,6 +160,30 @@ export class Traffic {
 
     /* tail lamps */
     const tailMat = new THREE.MeshBasicMaterial({ color: neon(0xff1428, 2.6), toneMapped: false });
+    /* A dim strip joining them, which is what makes a vehicle read as one thing
+       rather than as two lights.
+       Measured at three hundred kilometres an hour: at eighty and a hundred and
+       twenty metres two lorries with a gap between them are perfectly legible,
+       and by a hundred and sixty they are not — not because the lights merge or
+       the night is too dark, but because four red dots in a row have two kinds
+       of space between them and no way to tell which is which. A lorry's own
+       left-to-right spacing looks exactly like the gap you could ride through.
+       Joining a vehicle's own lights closes that ambiguity by construction: the
+       vehicle is a continuous mark, so every dark gap is a gap between two of
+       them. Real cars have worn a bar across the tailgate for years, so it
+       costs nothing in plausibility either.
+       What it buys, measured: legibility out from a hundred and twenty metres
+       to a hundred and sixty, which at three hundred kilometres an hour is one
+       and nine tenths of a second of warning instead of one and a half. What it
+       does not buy is two hundred and twenty — and brightening the strip with
+       distance to try for it was tried and reverted, because at that size the
+       vehicle is eleven pixels of bloom with no shape left to make continuous.
+       A hundred and sixty metres is what this geometry gives; reading further
+       than that would take a narrower field of view, not a brighter light. */
+    const barMat = new THREE.MeshBasicMaterial({ color: neon(0xff1428, 0.5), toneMapped: false });
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(L.x * 2, 0.07, 0.05), barMat);
+    bar.position.set(0, L.y, halfLen - 0.005);
+    group.add(bar);
     for (const dx of [-L.x, L.x]) {
       const t = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.06), tailMat);
       t.position.set(dx, L.y, halfLen);
@@ -265,7 +289,34 @@ export class Traffic {
     }
 
     this.group.add(group);
-    return { group, kind, len: g.len, glows, tailMat, blinkers, prevSpeed: 0 };
+    return { group, kind, len: g.len, glows, tailMat, barMat, blinkers, prevSpeed: 0 };
+  }
+
+  /**
+   * Put a car on the road wherever a caller asks for one.
+   *
+   * `pinned` is the part the game never uses: a pinned car does not drive, does
+   * not follow the one in front and does not move over for you. It exists so a
+   * known arrangement can be put in front of the camera and measured — two
+   * lorries a hundred and twenty metres out with a gap between them — which is
+   * impossible while the traffic system owns every position. The first attempt
+   * to measure how a gap reads at three hundred kilometres an hour photographed
+   * an empty road, because the cars had been driven off before the shutter
+   * opened.
+   */
+  place({ s, dir = 1, kind = 'sedan', lat = 1.75, speed = null, pinned = false }) {
+    const car = this.obtain(kind);
+    car.dir = dir;
+    car.lat = dir > 0 ? lat : -lat;
+    car.targetLat = car.lat;
+    car.speed = speed !== null ? speed
+      : kind === 'truck' ? 20 + this.rnd() * 5 : 24 + this.rnd() * 14;
+    car.cruise = car.speed;
+    car.s = s;
+    car.passed = false;
+    car.pinned = pinned;
+    this.cars.push(car);
+    return car;
   }
 
   spawn(sBike, dir) {
@@ -311,6 +362,7 @@ export class Traffic {
        whatever is in front of it in its own lane and eases back up to its
        cruising speed when the road clears. */
     for (const car of this.cars) {
+      if (car.pinned) continue;      // a pinned car is furniture, not traffic
       let lead = null;
       for (const other of this.cars) {
         if (other === car || other.dir !== car.dir) continue;
@@ -328,7 +380,7 @@ export class Traffic {
 
     for (let i = this.cars.length - 1; i >= 0; i--) {
       const car = this.cars[i];
-      car.s += car.dir * car.speed * dt;
+      if (!car.pinned) car.s += car.dir * car.speed * dt;
       const rel = car.s - sBike;
 
       if (rel > VIEW_DIST + 40 || rel < -110) {
@@ -338,7 +390,7 @@ export class Traffic {
       }
 
       /* there is no crashing in this game — traffic just courteously moves over */
-      if (car.dir > 0 && rel > 0 && rel < 42 && Math.abs(car.lat - latBike) < 2.6) {
+      if (!car.pinned && car.dir > 0 && rel > 0 && rel < 42 && Math.abs(car.lat - latBike) < 2.6) {
         car.targetLat = latBike > 0 ? 5.0 : 1.75;
         if (Math.abs(car.targetLat - latBike) < 2.6) car.targetLat = latBike > 3 ? 1.75 : 5.0;
       }
@@ -359,6 +411,7 @@ export class Traffic {
       const braking = car.prevSpeed - car.speed > 0.35 * dt * 60;
       car.prevSpeed = car.speed;
       car.tailMat.color.copy(neon(0xff1428, braking ? 6 : 2.6));
+      car.barMat.color.copy(neon(0xff1428, braking ? 1.5 : 0.5));
 
       /* And indicators while they are moving across. The lamps live in the car's
          own frame, and an oncoming car's group is turned around — so the road-space
