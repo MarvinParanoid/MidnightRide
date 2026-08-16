@@ -62,6 +62,7 @@ export class Scoring {
     this.sinceScore = 0;
     this.current = null;     // the car being passed right now
     this.currentMin = Infinity;
+    this.brushed = 0;        // the tightest band this pass has already announced
     this.events = [];        // what happened this frame, for sound and text
   }
 
@@ -94,9 +95,22 @@ export class Scoring {
       this.commit(speed);
       this.current = near.nearest;
       this.currentMin = Infinity;
+      this.brushed = 0;
     }
     if (this.current && near.clearance < this.currentMin) {
       this.currentMin = near.clearance;
+      /* The score is settled when the pass is over, because only then do you
+         know how close it came. The *feeling* cannot wait that long — by the
+         time the lorry is behind you the moment has gone, and a thump that
+         arrives late reads as a bug rather than as a thump. So the instant the
+         gap tightens into a band it has not been in yet, say so. The score
+         still totals at the end; this is only the flinch. */
+      const band = BANDS.find((bd) => near.clearance < bd.under);
+      if (band && band.worth > this.brushed) {
+        this.brushed = band.worth;
+        this.events.push({ kind: 'brush', band: band.name, worth: band.worth,
+          clearance: near.clearance, side: near.side || 1 });
+      }
     }
 
     if (this.sinceScore > COMBO_HOLD && this.combo > 0) {

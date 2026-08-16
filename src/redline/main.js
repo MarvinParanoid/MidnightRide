@@ -57,7 +57,7 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x06070f, 0.0066);
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.7, 5200);
 
-const { composer, grade } = createComposer(renderer, scene, camera, quality);
+const { composer, grade, bloom } = createComposer(renderer, scene, camera, quality);
 
 scene.add(assets().glowField.mesh);
 const road = new Road(scene);
@@ -123,6 +123,41 @@ function drive(dt) {
   if (state.lat > edge || state.lat < -edge) state.latV *= 0.3;   // the verge bites
   state.lat = clamp(state.lat, -edge, edge);
   state.s += state.v * dt;
+}
+
+
+/**
+ * What a near miss does to you.
+ *
+ * The scoring counts it; this is the part that is felt. Everything here already
+ * existed in the engine and was being used for atmosphere — the whoosh of air
+ * from a passing lorry, the bloom, the chromatic split in the grade, the
+ * percussion in the generated track. Pointed at a single instant and scaled by
+ * how close it was, the same parts become a punch.
+ *
+ * Five things at once, because one of them alone reads as an effect and all of
+ * them together read as an event: the camera flinches away from the car, the
+ * air goes past your ear on the correct side, the lights bloom for a frame, the
+ * colour tears, and the track puts a hit exactly there. The last is the one
+ * that matters most — the traffic becomes an instrument, and a good run does
+ * not merely score well, it plays better.
+ */
+const hit = { kick: 0, side: 1, flash: 0 };
+function impact(e) {
+  const force = e.worth / 8;                 // CLOSE is an eighth of NO WAY
+  hit.kick = Math.max(hit.kick, 0.3 + force * 1.5);
+  hit.side = e.side;
+  hit.flash = Math.max(hit.flash, 0.25 + force * 0.75);
+  if (engine) engine.whoosh(0.45 + force * 0.9);
+  if (music && audio) {
+    /* A snare for the close ones, a hat for the rest — chosen by how near it
+       was, not by where in the bar it fell. Landing it on the beat instead
+       would be truer to the idea that the traffic is an instrument, and it
+       needs the sequencer to hand out the next beat time, which it does not
+       yet. Off-grid is the honest version of this until it does. */
+    if (force > 0.45) music.snare(audio.t);
+    else music.hat(audio.t, 0.5 + force, force > 0.2);
+  }
 }
 
 /* ── the loop ───────────────────────────────────────────────── */
@@ -207,6 +242,7 @@ function frame() {
   proximity(traffic.cars, state.s, state.lat, state.v, nearby);
   if (live) {
     for (const e of scoring.update(dt, state.v, nearby)) {
+      if (e.kind === 'brush') impact(e);
       if (e.kind === 'pass') board.pass(e);
       if (e.kind === 'combo-lost') board.comboLost();
     }
@@ -223,14 +259,18 @@ function frame() {
     restart();
   }
 
-  /* the camera: one angle, close, and it does not wander */
+  /* the camera: one angle, close, and it does not wander — except when
+     something has just gone past close enough to shove it */
+  hit.kick = Math.max(0, hit.kick - dt * 4.2);
+  hit.flash = Math.max(0, hit.flash - dt * 3.4);
   cam.back = damp(cam.back, 6.6 + state.v * 0.035, 5, dt);
-  cam.lat = damp(cam.lat, state.lat * 0.85, 6, dt);
-  road.point(state.s - cam.back, cam.lat, 2.15, camPos);
+  cam.lat = damp(cam.lat, state.lat * 0.85 - hit.side * hit.kick * 0.5, 6, dt);
+  road.point(state.s - cam.back, cam.lat, 2.15 + hit.kick * 0.12, camPos);
   road.point(state.s + cam.ahead, state.lat * 0.6, 1.35, camLook);
   camera.position.copy(camPos);
   camera.lookAt(camLook);
-  camera.fov = 58 + Math.min(1, state.v / TOP) * 8;
+  camera.rotateZ(-hit.side * hit.kick * 0.045);      // it rocks away from the car
+  camera.fov = 58 + Math.min(1, state.v / TOP) * 8 + hit.kick * 2.4;
   camera.updateProjectionMatrix();
   heading.set(camLook.x - camPos.x, 0, camLook.z - camPos.z).normalize();
 
@@ -257,6 +297,11 @@ function frame() {
   grade.uniforms.uTime.value = clock;
   grade.uniforms.uSpeed.value = Math.pow(clamp(state.v / 62, 0, 1.1), 1.6);
   grade.uniforms.uWet.value = rainAmount * 0.4;
+  /* The colour tears for a moment, and the lights swell. Both are the existing
+     look pushed briefly past where it normally sits, rather than a new effect —
+     which is why it reads as the world reacting rather than as a filter. */
+  grade.uniforms.uAberration.value = 1 + hit.flash * 5;
+  bloom.strength = 0.95 + scoring.meter * 0.25 + hit.flash * 0.7;
 
   assets().glowField.update(scene);
   board.update(dt, { score: scoring.score, combo: scoring.combo, meter: scoring.meter,
@@ -291,6 +336,9 @@ window.__rl = { THREE, renderer, scene, camera, road, bike, traffic, state, scor
   /* Is anything actually going to come out of the speakers? Asked from the
      outside, because the failure this answers was invisible from the inside:
      every object updated correctly and the master gain was zero. */
+  /* What the last near miss did to the frame, for checking that it did it. */
+  probe: () => ({ aberration: grade.uniforms.uAberration.value, bloom: bloom.strength,
+    kick: hit.kick, flash: hit.flash }),
   audioProbe: () => (audio ? {
     context: audio.ctx.state,
     master: +audio.master.gain.value.toFixed(3),
