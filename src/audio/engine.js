@@ -1,6 +1,8 @@
 import { clamp, lerp } from '../geo.js';
 
-const GEARS = [0, 42, 68, 96, 128, 168, 220];   // km/h at the top of each gear
+/* km/h at the top of each gear. Six of them, ending where this machine ends.
+   A game that goes faster hands in a taller box — see the constructor. */
+const ROAD_GEARS = [0, 42, 68, 96, 128, 168, 220];
 const IDLE_RPM = 1250;
 const REDLINE = 9800;
 
@@ -9,7 +11,18 @@ const REDLINE = 9800;
  * filtered noise. Plus the wind, the tyres and the rain hitting your helmet.
  */
 export class EngineSound {
-  constructor(core) {
+  /**
+   * @param gears  km/h at the top of each gear, index 0 unused.
+   *
+   * Handed in rather than fixed, because past the top of the last one the
+   * gearbox has nothing to select and the note stops meaning anything. Measured
+   * on the stock box: at 260, 300 and 345 km/h the engine produced exactly the
+   * same sound, pinned at the redline, because every gear failed the over-rev
+   * test and the search fell back to its initial value of first. An arcade game
+   * doing three hundred and forty five spends its whole life up there.
+   */
+  constructor(core, { gears = ROAD_GEARS } = {}) {
+    this.gears = gears;
     const { ctx } = core;
     this.core = core;
 
@@ -118,7 +131,11 @@ export class EngineSound {
    */
   updateGearing(kmh, throttle, dt) {
     const wantFrac = lerp(0.42, 0.88, clamp(throttle, 0, 1));
-    let best = 1;
+    const GEARS = this.gears;
+    /* Fall back to the tallest gear, not the shortest. Nothing fits when you
+       are past the top of the box, and answering that with first gear is how
+       three hundred km/h came out sounding like a wheelie in a car park. */
+    let best = GEARS.length - 1;
     let bestErr = Infinity;
     for (let g = 1; g < GEARS.length; g++) {
       const revs = REDLINE * (kmh / GEARS[g]);

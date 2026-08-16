@@ -62,7 +62,7 @@ const { composer, grade, bloom } = createComposer(renderer, scene, camera, quali
 scene.add(assets().glowField.mesh);
 const road = new Road(scene);
 const bike = new Bike(scene);
-const traffic = new Traffic(scene, road, { courtesy: false });
+const traffic = new Traffic(scene, road, { courtesy: false, emptyHauls: 0 });
 const rain = new Rain(scene, 5000);
 rain.setDensity(quality.rain);
 const sky = new Sky(scene);
@@ -204,7 +204,9 @@ async function begin() {
   started = true;
   document.body.classList.add('riding');
   audio = new AudioCore();
-  engine = new EngineSound(audio);
+  /* A taller box, because this machine goes half as fast again as the one next
+     door and the stock six run out at two hundred and twenty. */
+  engine = new EngineSound(audio, { gears: [0, 46, 76, 110, 150, 196, 250, 310, 350] });
   music = new Music(audio);
   music.enabled = true;
   scoring.prime(state.v);
@@ -216,10 +218,34 @@ async function begin() {
   await audio.start();
 }
 
+/**
+ * Somewhere down the road with nothing standing in it.
+ *
+ * Two hundred and forty metres on from the wreck, and then as much further as
+ * it takes to find air. Measured before this existed: three restarts in forty
+ * landed within forty centimetres of a car and the worst of them a metre and a
+ * half *inside* one — an instant second death, one attempt in thirteen, in a
+ * game whose whole promise is that pressing anything puts you straight back on
+ * the road. Nothing feels more like being cheated than dying before the run
+ * has begun.
+ */
+function clearSpot(from) {
+  for (let tries = 0; tries < 14; tries++) {
+    const at = from + tries * 55;
+    let closest = Infinity;
+    for (const car of traffic.cars) {
+      if (Math.abs(car.s - at) > 55) continue;
+      closest = Math.min(closest, Math.abs(1.9 - car.lat) - ((car.half || 0.95) + 0.45));
+    }
+    if (closest > 1.4) return at;
+  }
+  return from + 14 * 55;           // the road is packed; take what we can get
+}
+
 function restart() {
   run = new Run();
   scoring.reset();
-  state.s += 240;                  // a clean stretch, rather than the wreck you left
+  state.s = clearSpot(state.s + 240);
   state.v = TOP * 0.5;
   state.lat = 1.9;
   state.latV = 0;

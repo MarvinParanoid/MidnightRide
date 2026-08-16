@@ -92,8 +92,19 @@ export class Traffic {
    * the difference between the two games is stated in one place, in the line
    * that builds their world.
    */
-  constructor(scene, road, { courtesy = true } = {}) {
+  constructor(scene, road, { courtesy = true, emptyHauls = 0.82 } = {}) {
     this.courtesy = courtesy;
+    /* How completely a long haul empties the road, 0 to 1.
+       Midnight Ride's whole middle distance is built on this: every so often
+       the generator commits to fifteen kilometres with no city in it, and the
+       traffic thinning to a single distant pair of tail lights is what makes
+       that stretch feel like somewhere rather than like a gap. Measured over
+       thirty kilometres at arcade speed, the same law leaves the last nine with
+       seventeen encounters where the first twenty-one had a hundred and thirty
+       eight, and one stretch of fifteen seconds with nothing within reach at
+       all. In a game whose entire loop is aiming at gaps, that is not
+       atmosphere, it is the loop stopping. */
+    this.emptyHauls = emptyHauls;
     this.road = road;
     this.group = new THREE.Group();
     scene.add(this.group);
@@ -369,7 +380,7 @@ export class Traffic {
       default: n = 4;
     }
     // deep in a long haul a single pair of tail lights becomes an event
-    return Math.max(0, Math.round(n * (1 - remote * 0.82)));
+    return Math.max(0, Math.round(n * (1 - remote * this.emptyHauls)));
   }
 
   update(dt, sBike, latBike, speedBike) {
