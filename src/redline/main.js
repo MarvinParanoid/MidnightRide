@@ -62,7 +62,7 @@ const { composer, grade, bloom } = createComposer(renderer, scene, camera, quali
 scene.add(assets().glowField.mesh);
 const road = new Road(scene);
 const bike = new Bike(scene);
-const traffic = new Traffic(scene, road);
+const traffic = new Traffic(scene, road, { courtesy: false });
 const rain = new Rain(scene, 5000);
 rain.setDensity(quality.rain);
 const sky = new Sky(scene);
@@ -118,7 +118,12 @@ function drive(dt) {
   state.latV = damp(state.latV, state.steer * reach, grip, dt);
   state.lat += state.latV * dt;
 
-  state.lat -= road.curvature(state.s) * state.v * state.v * 0.16 * dt;
+  /* The corner throws you towards the outside — but not by the square of the
+     speed, which is right for the other game's hundred and ninety and reads at
+     three hundred as the bike wandering off on its own rather than as a corner.
+     Held to something a rider can hold a line against. */
+  const push = road.curvature(state.s) * state.v * state.v * 0.16;
+  state.lat -= clamp(push, -2.6, 2.6) * dt;
   const edge = ROAD_HALF + SHOULDER;
   if (state.lat > edge || state.lat < -edge) state.latV *= 0.3;   // the verge bites
   state.lat = clamp(state.lat, -edge, edge);

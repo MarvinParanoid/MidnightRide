@@ -77,7 +77,23 @@ const PLATE_MAT = new THREE.MeshBasicMaterial({ color: neon(0xd6c9a6, 0.34), ton
 const REFLECT_MAT = new THREE.MeshBasicMaterial({ color: neon(0xff2418, 0.85), toneMapped: false });
 
 export class Traffic {
-  constructor(scene, road) {
+  /**
+   * @param courtesy  whether a car moves over when you come level with it.
+   *
+   * This is the one thing the traffic does that is a game rule rather than a
+   * fact about traffic, and it belongs to whoever is asking. Midnight Ride
+   * wants it: nothing there may end a ride, so a car you are about to occupy
+   * the same space as politely filters aside and you slip past. Midnight
+   * Redline must not have it — you are aiming at a gap, and a gap that widens
+   * itself the moment you commit is not a gap you threaded, it is a gap you
+   * were given.
+   *
+   * A property set once at construction rather than a flag consulted all over:
+   * the difference between the two games is stated in one place, in the line
+   * that builds their world.
+   */
+  constructor(scene, road, { courtesy = true } = {}) {
+    this.courtesy = courtesy;
     this.road = road;
     this.group = new THREE.Group();
     scene.add(this.group);
@@ -390,7 +406,8 @@ export class Traffic {
       }
 
       /* there is no crashing in this game — traffic just courteously moves over */
-      if (!car.pinned && car.dir > 0 && rel > 0 && rel < 42 && Math.abs(car.lat - latBike) < 2.6) {
+      if (this.courtesy && !car.pinned && car.dir > 0 && rel > 0 && rel < 42
+          && Math.abs(car.lat - latBike) < 2.6) {
         car.targetLat = latBike > 0 ? 5.0 : 1.75;
         if (Math.abs(car.targetLat - latBike) < 2.6) car.targetLat = latBike > 3 ? 1.75 : 5.0;
       }
