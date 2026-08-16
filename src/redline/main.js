@@ -62,7 +62,14 @@ const { composer, grade, bloom } = createComposer(renderer, scene, camera, quali
 scene.add(assets().glowField.mesh);
 const road = new Road(scene);
 const bike = new Bike(scene);
-const traffic = new Traffic(scene, road, { courtesy: false, emptyHauls: 0 });
+/* The arcade's own mix. The tunnel is the best room this world has for what
+   this game does — narrow, lit, nowhere to go — so it is the busiest, where the
+   ride has it near the bottom. Nothing is allowed to be empty. */
+const traffic = new Traffic(scene, road, {
+  courtesy: false,
+  emptyHauls: 0,
+  density: { TUNNEL: 11, CITY: 9, BRIDGE: 8, COAST: 7, 'GAS STATION': 6, FOREST: 6, default: 8 },
+});
 const rain = new Rain(scene, 5000);
 rain.setDensity(quality.rain);
 const sky = new Sky(scene);
@@ -105,7 +112,7 @@ const PUSH = 7.5;                  // how hard it pulls away on its own
  * gives braking a second job beyond buying time: it is also how you make the
  * tightest line. Which is the whole question the game is asking.
  */
-function drive(dt) {
+function drive(dt, wet) {
   const wants = input.throttle > 0.05 ? TOP : TOP * 0.62;
   state.v = damp(state.v, wants, PUSH / Math.max(8, state.v) * 1.4, dt);
   if (input.brake > 0.05) state.v = damp(state.v, 12, 1.9 * input.brake, dt);
@@ -113,7 +120,11 @@ function drive(dt) {
 
   const fast = Math.min(1, state.v / TOP);
   const reach = 9.2 - fast * 3.6;                 // how far sideways it will go
-  const grip = 3.4 + input.brake * 2.6 - fast * 1.1;   // how fast it agrees to
+  /* Water on the road is difficulty that arrives on its own. The weather here
+     drifts along the road rather than being set for the night, so a shower is a
+     stretch that has to be ridden with more room — and it costs nothing to
+     build, because it is already happening in the world around you. */
+  const grip = (3.4 + input.brake * 2.6 - fast * 1.1) * (1 - wet * 0.34);
   state.steer = damp(state.steer, input.steer, 12, dt);
   state.latV = damp(state.latV, state.steer * reach, grip, dt);
   state.lat += state.latV * dt;
@@ -122,7 +133,7 @@ function drive(dt) {
      speed, which is right for the other game's hundred and ninety and reads at
      three hundred as the bike wandering off on its own rather than as a corner.
      Held to something a rider can hold a line against. */
-  const push = road.curvature(state.s) * state.v * state.v * 0.16;
+  const push = road.curvature(state.s) * state.v * state.v * 0.16 * (1 + wet * 0.5);
   state.lat -= clamp(push, -2.6, 2.6) * dt;
   const edge = ROAD_HALF + SHOULDER;
   if (state.lat > edge || state.lat < -edge) state.latV *= 0.3;   // the verge bites
@@ -161,13 +172,15 @@ function impact(e) {
 
   if (engine) engine.whoosh(0.45 + force * 0.9);
   if (music && audio) {
-    /* A snare for the close ones, a hat for the rest — chosen by how near it
-       was, not by where in the bar it fell. Landing it on the beat instead
-       would be truer to the idea that the traffic is an instrument, and it
-       needs the sequencer to hand out the next beat time, which it does not
-       yet. Off-grid is the honest version of this until it does. */
-    if (force > 0.45) music.snare(audio.t);
-    else music.hat(audio.t, 0.5 + force, force > 0.2);
+    /* On the grid, not merely on time. Fired at the exact instant of the pass
+       the hit lands wherever it falls in the bar and reads as a sound effect
+       played over the music; nudged to the next sixteenth it reads as part of
+       the music, and the traffic stops being scored and starts being played.
+       A sixteenth is a hundred and fifty milliseconds at this tempo, so the
+       delay is under the threshold at which a reaction feels late. */
+    const on = music.gridTime(audio.t);
+    if (force > 0.45) music.snare(on);
+    else music.hat(on, 0.5 + force, force > 0.2);
     /* And shove the energy up by hand rather than waiting for it to drift.
        The track chases the meter with a second and a half of lag and the layer
        gates smooth it further, so a magnificent pass used to produce no audible
@@ -266,12 +279,12 @@ function frame() {
   hit.slow = Math.max(0, hit.slow - dt * 7.5);
   const simDt = dt * (1 - hit.slow * 0.55);
 
+  const rainAmount = rainAt(state.s, weather);
   const live = started && !run.frozen;
-  if (live) drive(simDt);
+  if (live) drive(simDt, rainAmount);
 
   road.update(state.s);
   const pal = palette(nightHourFromLocal());
-  const rainAmount = rainAt(state.s, weather);
   scene.fog.color.copy(pal.fog);
   scene.fog.density = pal.density * weather.fogMul;
   renderer.setClearColor(pal.fog, 1);
@@ -325,7 +338,12 @@ function frame() {
   camera.position.copy(camPos);
   camera.lookAt(camLook);
   camera.rotateZ(-hit.side * hit.kick * 0.045);      // it rocks away from the car
-  camera.fov = 58 + Math.min(1, state.v / TOP) * 8 + hit.kick * 2.4;
+  /* Narrower than the other game's sixty-two. Reading distance is angular size
+     and nothing else: at sixty-two a two-and-a-half-metre gap a hundred and
+     sixty metres out is a dozen pixels, and no amount of brightness fixes that.
+     A tighter lens is the only lever there is, and it costs some of the sense of
+     rush — which is why the speed still widens it, just from further in. */
+  camera.fov = 50 + Math.min(1, state.v / TOP) * 6 + hit.kick * 2.4;
   camera.updateProjectionMatrix();
   heading.set(camLook.x - camPos.x, 0, camLook.z - camPos.z).normalize();
 

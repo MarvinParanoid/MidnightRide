@@ -92,7 +92,14 @@ export class Traffic {
    * the difference between the two games is stated in one place, in the line
    * that builds their world.
    */
-  constructor(scene, road, { courtesy = true, emptyHauls = 0.82 } = {}) {
+  constructor(scene, road, { courtesy = true, emptyHauls = 0.82, density = null } = {}) {
+    /* How many vehicles each biome keeps in view. The ride's mix is a mood: a
+       city busy, a forest all but empty, and the contrast between them is the
+       shape of an hour's riding. An arcade run is four minutes long and the
+       contrast reads as stretches with nothing to do — and its best rooms are
+       the narrow ones, so the tunnel wants to be the busiest place on the road
+       rather than the second quietest. */
+    this.density = density;
     this.courtesy = courtesy;
     /* How completely a long haul empties the road, 0 to 1.
        Midnight Ride's whole middle distance is built on this: every so often
@@ -370,16 +377,19 @@ export class Traffic {
   /** How busy the road feels, by biome — and by how far from anywhere it is. */
   targetCount(biome, remote = 0) {
     let n;
-    switch (biome) {
-      case BIOME.CITY: n = 7; break;
-      case BIOME.TUNNEL: n = 4; break;
-      case BIOME.GAS: n = 3; break;
-      case BIOME.FOREST: n = 2; break;
-      case BIOME.BRIDGE: n = 3; break;
-      case BIOME.COAST: n = 3; break;
-      default: n = 4;
+    if (this.density) {
+      n = this.density[biome] ?? this.density.default;
+    } else {
+      switch (biome) {
+        case BIOME.CITY: n = 7; break;
+        case BIOME.TUNNEL: n = 4; break;
+        case BIOME.GAS: n = 3; break;
+        case BIOME.FOREST: n = 2; break;
+        case BIOME.BRIDGE: n = 3; break;
+        case BIOME.COAST: n = 3; break;
+        default: n = 4;
+      }
     }
-    // deep in a long haul a single pair of tail lights becomes an event
     return Math.max(0, Math.round(n * (1 - remote * this.emptyHauls)));
   }
 

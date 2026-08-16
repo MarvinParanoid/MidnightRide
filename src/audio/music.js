@@ -101,6 +101,32 @@ export class Music {
     return 60 / this.bpm / 4;
   }
 
+  /**
+   * The audio time of the next step boundary at or after `t`.
+   *
+   * For anything outside the sequencer that wants to put a sound *in* the
+   * track rather than over it. The arcade game's near misses are the reason it
+   * exists: a hit fired the instant a lorry goes past lands wherever it lands
+   * in the bar and reads as a sound effect, while the same hit nudged onto the
+   * grid reads as part of the music — which is the difference between traffic
+   * that is scored and traffic that is played.
+   *
+   * Sixteenths by default, which at a hundred beats a minute is a hundred and
+   * fifty milliseconds. Quantising to anything coarser would make a reaction
+   * sound late, which is worse than making it sound loose.
+   *
+   * @param every  grid in steps: 1 sixteenths, 2 eighths, 4 on the beat
+   */
+  gridTime(t, every = 1) {
+    const d = this.stepDur;
+    if (!this.nextTime || !(d > 0)) return t;
+    let time = this.nextTime;
+    let step = this.step;
+    while (time - d >= t) { time -= d; step--; }
+    while (time < t || (((step % every) + every) % every) !== 0) { time += d; step++; }
+    return time;
+  }
+
   /** Where the ride currently is; the radio decides what to do about it. */
   setContext(ctx) {
     this.ctxInfo = ctx;
