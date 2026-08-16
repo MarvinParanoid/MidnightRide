@@ -62,9 +62,9 @@ const LAMPS = {
 /** Shared geometry — every car on the road is one of these three. */
 function carGeometries() {
   return {
-    sedan: { body: new THREE.BoxGeometry(1.86, 0.62, 4.4), cabin: new THREE.BoxGeometry(1.66, 0.56, 2.2), cabinY: 0.56, cabinZ: 0.2, len: 4.4 },
-    van: { body: new THREE.BoxGeometry(2.0, 1.5, 5.4), cabin: new THREE.BoxGeometry(1.9, 0.5, 1.6), cabinY: 0.95, cabinZ: -1.6, len: 5.4 },
-    truck: { body: new THREE.BoxGeometry(2.5, 3.1, 12.5), cabin: new THREE.BoxGeometry(2.4, 1.6, 2.4), cabinY: 0.4, cabinZ: -5.6, len: 12.5 },
+    sedan: { body: new THREE.BoxGeometry(1.86, 0.62, 4.4), cabin: new THREE.BoxGeometry(1.66, 0.56, 2.2), cabinY: 0.56, cabinZ: 0.2, len: 4.4, half: 0.93 },
+    van: { body: new THREE.BoxGeometry(2.0, 1.5, 5.4), cabin: new THREE.BoxGeometry(1.9, 0.5, 1.6), cabinY: 0.95, cabinZ: -1.6, len: 5.4, half: 1.0 },
+    truck: { body: new THREE.BoxGeometry(2.5, 3.1, 12.5), cabin: new THREE.BoxGeometry(2.4, 1.6, 2.4), cabinY: 0.4, cabinZ: -5.6, len: 12.5, half: 1.25 },
   };
 }
 
@@ -305,7 +305,10 @@ export class Traffic {
     }
 
     this.group.add(group);
-    return { group, kind, len: g.len, glows, tailMat, barMat, blinkers, prevSpeed: 0 };
+    /* `half` is the body's own half-width. Anything that needs to know
+       whether two things touched needs the real number, not a margin
+       tuned for something else. */
+    return { group, kind, len: g.len, half: g.half, glows, tailMat, barMat, blinkers, prevSpeed: 0 };
   }
 
   /**

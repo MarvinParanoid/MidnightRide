@@ -273,6 +273,7 @@ function frame() {
       if (e.kind === 'pass') board.pass(e);
       if (e.kind === 'combo-lost') board.comboLost();
     }
+    /* No margin at all: the metal has to actually meet. */
     if (nearby.contact && run.crash()) {
       scoring.crash();
       board.crash(run.summary(scoring));
@@ -376,6 +377,7 @@ window.__rl = { THREE, renderer, scene, camera, road, bike, traffic, state, scor
      outside, because the failure this answers was invisible from the inside:
      every object updated correctly and the master gain was zero. */
   /* What the last near miss did to the frame, for checking that it did it. */
+  probeNear: () => ({ clearance: nearby.clearance, along: nearby.along, contact: nearby.contact }),
   probe: () => ({ aberration: grade.uniforms.uAberration.value, bloom: bloom.strength,
     vignette: grade.uniforms.uVignette.value, speed: grade.uniforms.uSpeed.value,
     kick: hit.kick, punch: hit.punch, glow: hit.glow, slow: hit.slow }),

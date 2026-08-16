@@ -465,7 +465,15 @@ function drive(dt, c) {
      you aside instead, a motorcycle filtering past, which is what a bike would
      do anyway. No damage, no fail state. */
   proximity(traffic.cars, state.s, state.lat, state.v, nearby);
-  if (nearby.contact) state.lat += nearby.overlap * nearby.side * 3.2 * dt;
+  /* Eased aside before the paint meets, not after: the courtesy margin is the
+     point of it, and it is this game's alone. The measurement underneath is now
+     the real distance between the two bodies, so the margin has to be stated
+     rather than baked into it — which is what let the arcade game inherit it by
+     accident and kill people who were still half a metre clear. */
+  const room = 0.62;
+  if (nearby.clearance < room && nearby.along < 1.2) {
+    state.lat += (room - nearby.clearance) * nearby.side * 3.2 * dt;
+  }
 
   /* You can put a wheel on the verge, but not drive out across the field: the
      bike rides at road height and the ground beside it is a metre lower, so

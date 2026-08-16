@@ -20,30 +20,19 @@
  */
 
 /**
- * How far apart their centres have to be to have passed without touching.
- *
- * Not a sum of half-widths, though it looks like one: it is a figure tuned by
- * feel, at which filtering past a car reads as tight rather than as clipping
- * through it, and the ride has been using it for months. Kept exactly, because
- * changing it would change how the existing game handles for no reason beyond
- * tidiness.
+ * The bike's own half-width and length, in metres: bars and knees, wheel to
+ * wheel. Real numbers, because everything downstream of here is deciding
+ * whether two objects touched.
  */
-const PASSING_ROOM = 2.1;
+const BIKE_HALF = 0.45;
+const BIKE_LEN = 2.1;
 
-/**
- * @param cars   the live traffic
- * @param s      the rider's distance along the road
- * @param lat    the rider's lateral offset
- * @param v      the rider's speed, for the closing rate
- * @returns a reading of this frame, reusing one object — it is read and acted
- *          on immediately, and a fresh one every frame at sixty frames a second
- *          is a garbage collection nobody needs.
- */
 export function proximity(cars, s, lat, v, out = {}) {
   out.count = 0;             // how many cars are alongside right now
   out.clearance = Infinity;  // metres of clear road beside the nearest of them
   out.nearest = null;
   out.overlap = 0;           // how far into the bike's own width a car reaches
+  out.along = Infinity;      // metres of air ahead of or behind it
   out.closing = 0;           // metres per second the gap is shrinking
   out.side = 0;              // which side the nearest one is on: -1 or +1
 
@@ -51,27 +40,40 @@ export function proximity(cars, s, lat, v, out = {}) {
     /* Alongside means overlapping in the direction of travel: a car ten metres
        ahead is not a near miss however close its lane is. */
     const ds = car.s - s;
-    const reach = car.len / 2 + 2.2;
-    if (Math.abs(ds) > reach) continue;
+    /* Air between the two bodies, along the road and across it. Negative on
+       either axis means they are overlapping on that axis; negative on both
+       means they are in the same place, which is a collision in any game that
+       has them.
+       This used to be measured against a margin of 2.1 metres between centres,
+       which is the distance at which Midnight Ride starts easing you aside —
+       a courtesy threshold, tuned by feel, and about seven tenths of a metre
+       wider than the cars actually are. Borrowed as a *collision* test by the
+       arcade game it read exactly as reported: dying while the car was still
+       visibly over there. Measure the metal; let each game pick its own margin
+       against it. */
+    const along = Math.abs(ds) - (car.len + BIKE_LEN) / 2;
+    if (along > 3) continue;
 
     const dl = lat - car.lat;
-    /* Clearance is the air between them, not the gap between their centres. */
-    const clear = Math.abs(dl) - PASSING_ROOM;
+    const clear = Math.abs(dl) - ((car.half || 0.95) + BIKE_HALF);
     out.count++;
     if (clear < out.clearance) {
+      out.along = along;
       out.clearance = clear;
       out.nearest = car;
       out.side = Math.sign(dl || 1);
-      out.overlap = Math.max(0, -clear);
       /* Oncoming closes at the sum of the speeds; overtaking, at the
          difference. The sign of `dir` carries which. */
       out.closing = car.dir > 0 ? Math.abs(v - car.speed) : v + car.speed;
     }
   }
 
-  if (out.nearest === null) out.clearance = Infinity;
-  /* Touching, in the sense that matters: no air left between them. One game
-     calls this a reason to move over, the other calls it the end of the run. */
-  out.contact = out.clearance < 0;
+  if (out.nearest === null) { out.clearance = Infinity; out.along = Infinity; }
+  /* Touching: no air left on either axis. One game calls this a reason to move
+     over — and gives itself a margin, because being eased aside before the
+     paint meets is the point of it — and the other calls it the end of the run,
+     with no margin at all. */
+  out.contact = out.clearance < 0 && out.along < 0;
+  out.overlap = Math.max(0, -out.clearance);
   return out;
 }
